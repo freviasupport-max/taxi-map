@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="ja" translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1d1c19">
+<meta name="robots" content="noindex">
+<meta name="google" content="notranslate">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: blob: https://tiles.openfreemap.org; connect-src https://tiles.openfreemap.org https://routing.openstreetmap.de https://valhalla1.openstreetmap.de https://overpass-api.de; worker-src blob:; child-src blob:; font-src 'self'; base-uri 'none'; form-action 'none'">
+<title>タクシー施設マップ</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" crossorigin="anonymous">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" crossorigin="anonymous"></script>
+<style>
+:root{--ink:#1d1c19;--paper:#fff;--muted:#6b6860;--line:#e2dfd6;--lamp:#f2b705;
+ --font:"Hiragino Sans","Noto Sans JP","BIZ UDPGothic",system-ui,sans-serif}
+html,body{margin:0;height:100%;font-family:var(--font);color:var(--ink);background:#eee}
+#map{position:fixed;inset:0}
+/* 上部バー */
+.top{position:fixed;left:0;right:0;top:0;z-index:5;padding:calc(8px + env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) 6px max(10px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.top>*{pointer-events:auto}
+.bar{display:flex;gap:6px}
+#q{flex:1;min-width:0;font:inherit;font-size:16px;padding:11px 14px;border:0;border-radius:12px;background:var(--paper);box-shadow:0 2px 10px rgba(0,0,0,.18)}
+.btn{font:inherit;font-weight:700;font-size:14px;border:0;border-radius:12px;padding:0 14px;background:var(--ink);color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:4px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;font:inherit;font-size:13px;font-weight:700;padding:6px 10px;border-radius:999px;border:0;background:var(--paper);color:var(--ink);box-shadow:0 1px 6px rgba(0,0,0,.15);cursor:pointer;display:flex;gap:4px;align-items:center}
+.chip[aria-pressed="false"]{opacity:.45}
+#results{background:var(--paper);border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.2);max-height:45vh;overflow:auto}
+#results button{display:flex;gap:10px;align-items:center;width:100%;text-align:left;font:inherit;padding:11px 14px;border:0;border-bottom:1px solid var(--line);background:none;cursor:pointer}
+#results small{color:var(--muted)}
+/* ピン */
+.pin{display:flex;flex-direction:column;align-items:center;cursor:pointer}
+.ic{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:16px;line-height:1;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.lb{margin-top:2px;font-size:12.5px;font-weight:800;color:#111;white-space:nowrap;letter-spacing:.01em;
+ text-shadow:0 0 2px #fff,0 0 2px #fff,1px 1px 0 #fff,-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,0 1px 0 #fff,0 -1px 0 #fff;display:none}
+#map.labels .lb{display:block}
+.pin.hl .ic{transform:scale(1.35);outline:3px solid var(--lamp)}
+/* 下部シート */
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--paper);border-radius:18px 18px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,.2);padding:14px max(16px,env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:10px;max-width:640px;margin:0 auto}
+.sh{display:flex;align-items:flex-start;gap:10px}
+.sheet.min>*:not(.sh){display:none!important}
+.sheet.min{max-height:none!important;overflow:visible!important}
+.sheet.min .sh h2{font-size:16px}
+.sh h2{margin:0;font-size:19px;line-height:1.35;flex:1}
+.meta{font-size:13px;color:var(--muted);line-height:1.6}
+.x{border:0;background:var(--line);border-radius:50%;width:32px;height:32px;font-size:16px;cursor:pointer;flex:none}
+.go{display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;font-weight:800;font-size:17px;padding:14px;border-radius:12px;background:var(--lamp);color:var(--ink)}
+.alt{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.alt a,.alt button{font:inherit;font-size:13px;font-weight:700;text-align:center;text-decoration:none;padding:10px 4px;border-radius:10px;border:1px solid var(--line);background:var(--paper);color:var(--ink);cursor:pointer}
+.near{display:flex;flex-direction:column}
+.near button{display:flex;justify-content:space-between;gap:10px;font:inherit;text-align:left;padding:10px 2px;border:0;border-bottom:1px solid var(--line);background:none;cursor:pointer}
+.near b{font-variant-numeric:tabular-nums}
+.route{display:flex;flex-direction:column;gap:6px;font-size:14px;line-height:1.6}
+.route .sum{font-weight:800;font-size:15px}
+.route ol{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:4px 2px;align-items:center}
+.route li{background:#fff7d6;border:1px solid #f2d36b;border-radius:8px;padding:2px 8px;font-weight:700}
+.route li small{font-weight:400;color:var(--muted);margin-left:4px}
+.route .arr{color:var(--muted)}
+.rc{border:2px solid var(--line);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;cursor:pointer;text-align:left;background:var(--paper);font:inherit;color:var(--ink)}
+.rc.on{border-color:#7c3aed;background:#f6f0ff}
+.rc .ttl{font-weight:800;font-size:14px}
+.rc .grp{font-size:12px;font-weight:800;color:var(--muted);letter-spacing:.08em;margin-top:6px}
+.rc .hw{font-size:13px;line-height:1.7}
+.rc .hw b{display:inline-block;border-radius:6px;padding:0 6px;color:#fff;font-size:12px;margin-right:4px}
+.rc .hw .in{background:#16a34a}.rc .hw .out{background:#dc2626}
+.rc .toll{font-weight:800}
+.grp{font-size:12px;font-weight:800;color:var(--muted);letter-spacing:.08em;margin-top:4px}
+.rc .rd{font-size:15px;font-weight:700;line-height:1.7}
+.route .note{font-size:11px;color:var(--muted)}
+.rbtn{font:inherit;font-weight:700;font-size:14px;padding:10px;border-radius:10px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(20px + env(safe-area-inset-bottom));z-index:9;max-width:600px;margin:0 auto;background:var(--ink);color:#fff;padding:12px 14px;border-radius:12px;font-size:14px;line-height:1.6}
+[hidden]{display:none!important}
+.maplibregl-ctrl-top-right{top:calc(108px + env(safe-area-inset-top))}
+:focus-visible{outline:3px solid var(--lamp);outline-offset:2px}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="top">
+  <div class="bar">
+    <input id="q" type="search" placeholder="施設名で検索" autocomplete="off" aria-label="施設名で検索">
+    <button class="btn" id="nearBtn" type="button">近い順</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div id="results" hidden></div>
+</div>
+
+<section class="sheet" id="sheet" hidden aria-live="polite"></section>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+const VERSION = "2026-10-31 v15";
+const PTS = [{"n": "専修大 神田", "f": "専修大学 神田キャンパス", "c": "大学", "a": "", "lat": 35.696843, "lng": 139.75415, "x": 1}, {"n": "清澄庭園", "f": "清澄庭園", "c": "公園・庭園", "a": "", "lat": 35.680902, "lng": 139.797265, "x": 1}, {"n": "全国町村会館", "f": "全国町村会館", "c": "企業・団体", "a": "", "lat": 35.678825, "lng": 139.741888, "x": 1}, {"n": "浅草寺", "f": "浅草寺", "c": "寺社・教会", "a": "東京都台東区浅草2-3-1", "lat": 35.714765, "lng": 139.796655, "x": 1}, {"n": "鈴本演芸場", "f": "落語寄席 鈴本演芸場", "c": "劇場・ホール", "a": "", "lat": 35.70923, "lng": 139.773055, "x": 1}, {"n": "お茶の水女子大学", "f": "お茶の水女子大学", "c": "大学", "a": "", "lat": 35.718835, "lng": 139.731509, "x": 1}, {"n": "自動車会館", "f": "自動車会館", "c": "企業・団体", "a": "", "lat": 35.690572, "lng": 139.737027, "x": 1}, {"n": "久松警察署", "f": "警視庁 久松警察署", "c": "警察署", "a": "", "lat": 35.688379, "lng": 139.78472, "x": 1}, {"n": "聖路加国際病院", "f": "聖路加国際病院", "c": "病院", "a": "東京都中央区明石町9-1", "lat": 35.66744, "lng": 139.776707, "x": 1}, {"n": "東京証券取引所", "f": "東京証券取引所", "c": "企業・団体", "a": "", "lat": 35.682696, "lng": 139.778803, "x": 1}, {"n": "千代田区役所", "f": "千代田区役所", "c": "区役所", "a": "", "lat": 35.694044, "lng": 139.753447, "x": 1}, {"n": "東京ドーム", "f": "東京ドーム", "c": "スポーツ", "a": "東京都文京区後楽1-3-61", "lat": 35.70564, "lng": 139.751891, "x": 1}, {"n": "浜離宮恩賜庭園", "f": "浜離宮恩賜庭園", "c": "公園・庭園", "a": "", "lat": 35.659656, "lng": 139.763409, "x": 1}, {"n": "東京スクエアガーデン", "f": "東京スクエアガーデン", "c": "商業施設", "a": "", "lat": 35.676177, "lng": 139.768483, "x": 1}, {"n": "オークラ東京", "f": "オークラ東京", "c": "ホテル", "a": "東京都港区虎ノ門2-10-4", "lat": 35.667175, "lng": 139.74386, "x": 1}, {"n": "東京大学", "f": "東京大学", "c": "大学", "a": "", "lat": 35.714756, "lng": 139.761332, "x": 1}, {"n": "港区役所", "f": "港区役所", "c": "区役所", "a": "", "lat": 35.658023, "lng": 139.75148, "x": 1}, {"n": "東京国際フォーラム", "f": "東京国際フォーラム", "c": "劇場・ホール", "a": "東京都千代田区丸の内3-5-1", "lat": 35.676743, "lng": 139.763753, "x": 1}, {"n": "トリトンスクエアガーデン", "f": "トリトンスクエアガーデン", "c": "商業施設", "a": "", "lat": 35.657146, "lng": 139.780891, "x": 1}, {"n": "東京国立博物館", "f": "東京国立博物館", "c": "美術館・博物館", "a": "", "lat": 35.718835, "lng": 139.776522, "x": 1}, {"n": "朝日新聞", "f": "㈱朝日新聞社 東京本社", "c": "企業・団体", "a": "", "lat": 35.664255, "lng": 139.766646, "x": 1}, {"n": "東京商工会議所", "f": "東京商工会議所", "c": "企業・団体", "a": "", "lat": 35.67814, "lng": 139.761264, "x": 1}, {"n": "砂防会館別館", "f": "砂防会館別館", "c": "企業・団体", "a": "", "lat": 35.679457, "lng": 139.740214, "x": 1}, {"n": "特許庁", "f": "特許庁", "c": "官庁・裁判所", "a": "", "lat": 35.671022, "lng": 139.745846, "x": 1}, {"n": "両国国技館", "f": "両国国技館", "c": "スポーツ", "a": "", "lat": 35.697005, "lng": 139.793512, "x": 1}, {"n": "浅草ビューホテル", "f": "浅草ビューホテル", "c": "ホテル", "a": "", "lat": 35.715391, "lng": 139.792164, "x": 1}, {"n": "日経新聞", "f": "日本経済新聞社 東京本社", "c": "企業・団体", "a": "", "lat": 35.688643, "lng": 139.762319, "x": 1}, {"n": "三井記念病院", "f": "三井記念病院", "c": "病院", "a": "", "lat": 35.699833, "lng": 139.779213, "x": 1}, {"n": "東京山手メディカルセンター", "f": "JCHO 東京山手メディカルセンター", "c": "病院", "a": "", "lat": 35.669175, "lng": 139.744584, "x": 1}, {"n": "国際医療福祉大三田病院", "f": "国際医療福祉大学三田病院", "c": "病院", "a": "", "lat": 35.653885, "lng": 139.74249, "x": 1}, {"n": "目黒不動尊", "f": "目黒不動尊 瀧泉寺 (目黒区)", "c": "寺社・教会", "a": "", "lat": 35.628639, "lng": 139.708073, "x": 1}, {"n": "品川陸運支局", "f": "関東運輸局東京運輸支局", "c": "運転免許・運輸", "a": "", "lat": 35.604721, "lng": 139.746992, "x": 1}, {"n": "品川区役所", "f": "品川区役所", "c": "区役所", "a": "", "lat": 35.609232, "lng": 139.730279, "x": 1}, {"n": "昭和医科大学病院", "f": "昭和医科大学病院", "c": "病院", "a": "", "lat": 35.608323, "lng": 139.703545, "x": 1}, {"n": "恵比寿ガーデンプレイス", "f": "恵比寿ガーデンプレイス", "c": "商業施設", "a": "", "lat": 35.642491, "lng": 139.71385, "x": 1}, {"n": "桐ケ谷斎場", "f": "桐ケ谷斎場", "c": "寺社・教会", "a": "", "lat": 35.622249, "lng": 139.713591, "x": 1}, {"n": "東郷記念館", "f": "東郷記念館", "c": "式場", "a": "", "lat": 35.67163, "lng": 139.706242, "x": 1}, {"n": "豊川稲荷東京別院", "f": "豊川稲荷東京別院", "c": "寺社・教会", "a": "", "lat": 35.67646, "lng": 139.732927, "x": 1}, {"n": "国立能楽堂", "f": "国立能楽堂", "c": "劇場・ホール", "a": "", "lat": 35.680686, "lng": 139.7079, "x": 1}, {"n": "目黒雅叙園", "f": "目黒雅叙園・百段階段・頂上の間", "c": "式場", "a": "", "lat": 35.632288, "lng": 139.714435, "x": 1}, {"n": "荏原病院", "f": "荏原病院（東京都保健医療公社）", "c": "病院", "a": "", "lat": 35.593735, "lng": 139.692976, "x": 1}, {"n": "林試の森公園", "f": "林試の森公園", "c": "公園・庭園", "a": "", "lat": 35.62528, "lng": 139.701394, "x": 1}, {"n": "泉岳寺", "f": "泉岳寺", "c": "寺社・教会", "a": "", "lat": 35.63774, "lng": 139.736401, "x": 1}, {"n": "星薬科大学", "f": "星薬科大学", "c": "大学", "a": "", "lat": 35.618681, "lng": 139.71232, "x": 1}, {"n": "東京品川病院", "f": "東京品川病院", "c": "病院", "a": "", "lat": 35.601722, "lng": 139.734877, "x": 1}, {"n": "在京マレーシア大使館", "f": "在京マレーシア大使館", "c": "大使館", "a": "", "lat": 35.652329, "lng": 139.695507, "x": 1}, {"n": "オリンピックセンター", "f": "国立オリンピック記念青少年総合センター", "c": "施設", "a": "", "lat": 35.674903, "lng": 139.693174, "x": 1}, {"n": "聖心女子大学", "f": "聖心女子大学", "c": "大学", "a": "", "lat": 35.651948, "lng": 139.71986, "x": 1}, {"n": "洗足池公園", "f": "洗足池公園", "c": "公園・庭園", "a": "", "lat": 35.603144, "lng": 139.691034, "x": 1}, {"n": "迎賓館赤坂離宮", "f": "迎賓館赤坂離宮", "c": "公園・庭園", "a": "", "lat": 35.680354, "lng": 139.728777, "x": 1}, {"n": "東京都庭園美術館", "f": "東京都庭園美術館", "c": "美術館・博物館", "a": "", "lat": 35.636947, "lng": 139.719041, "x": 1}, {"n": "明治学院大 白金", "f": "明治学院大学 白金キャンパス", "c": "大学", "a": "", "lat": 35.637427, "lng": 139.730778, "x": 1}, {"n": "東京ミッドタウン", "f": "東京ミッドタウン", "c": "商業施設", "a": "東京都港区赤坂9-7-1", "lat": 35.66598, "lng": 139.730875, "x": 1}, {"n": "慶應義塾大学", "f": "慶應義塾大学", "c": "大学", "a": "", "lat": 35.64896, "lng": 139.743169, "x": 1}, {"n": "品川警察署", "f": "品川警察署", "c": "警察署", "a": "", "lat": 35.613873, "lng": 139.745323, "x": 1}, {"n": "東京共済病院", "f": "東京共済病院", "c": "病院", "a": "", "lat": 35.641251, "lng": 139.703774, "x": 1}, {"n": "アークヒルズ", "f": "アークヒルズ", "c": "商業施設", "a": "", "lat": 35.667103, "lng": 139.740143, "x": 1}, {"n": "ホテル アジア会館", "f": "ホテル アジア会館", "c": "ホテル", "a": "", "lat": 35.670468, "lng": 139.728046, "x": 1}, {"n": "駐日ロシア連邦大使館", "f": "駐日ロシア連邦大使館", "c": "大使館", "a": "", "lat": 35.659473, "lng": 139.741222, "x": 1}, {"n": "根津美術館", "f": "根津美術館", "c": "美術館・博物館", "a": "", "lat": 35.662257, "lng": 139.717094, "x": 1}, {"n": "伊藤忠商事", "f": "伊藤忠商事㈱ 東京本社", "c": "企業・団体", "a": "", "lat": 35.670105, "lng": 139.740508, "x": 1}, {"n": "東京医療センター", "f": "独立行政法人国立病院機構 東京医療センター", "c": "病院", "a": "", "lat": 35.628157, "lng": 139.66629, "x": 1}, {"n": "日本赤十字社医療センター", "f": "日本赤十字社医療センター", "c": "病院", "a": "", "lat": 35.654537, "lng": 139.717874, "x": 1}, {"n": "青山学院大", "f": "青山学院大学 青山キャンパス", "c": "大学", "a": "", "lat": 35.660519, "lng": 139.709969, "x": 1}, {"n": "芝浦食肉市場", "f": "東京都中央卸売市場食肉市場", "c": "企業・団体", "a": "", "lat": 35.62782, "lng": 139.743924, "x": 1}, {"n": "増上寺", "f": "増上寺", "c": "寺社・教会", "a": "", "lat": 35.657479, "lng": 139.748293, "x": 1}, {"n": "下北沢交番", "f": "北沢警察署 下北沢交番", "c": "警察署", "a": "", "lat": 35.662829, "lng": 139.669541, "x": 1}, {"n": "目黒郵便局", "f": "目黒郵便局", "c": "郵便局", "a": "", "lat": 35.627765, "lng": 139.693857, "x": 1}, {"n": "セルリアンタワー", "f": "セルリアンタワー東急ホテル", "c": "ホテル", "a": "", "lat": 35.656409, "lng": 139.699354, "x": 1}, {"n": "大鳥神社", "f": "大鳥神社", "c": "寺社・教会", "a": "", "lat": 35.632152, "lng": 139.708108, "x": 1}, {"n": "八芳園", "f": "八芳園", "c": "式場", "a": "", "lat": 35.638195, "lng": 139.727959, "x": 1}, {"n": "世田谷区役所", "f": "世田谷区役所", "c": "区役所", "a": "", "lat": 35.646581, "lng": 139.653318, "x": 1}, {"n": "目黒区役所", "f": "目黒区役所", "c": "区役所", "a": "", "lat": 35.64136, "lng": 139.698151, "x": 1}, {"n": "目黒警察署", "f": "警視庁 目黒警察署", "c": "警察署", "a": "", "lat": 35.638052, "lng": 139.705164, "x": 1}, {"n": "國學院大學", "f": "國學院大學", "c": "大学", "a": "", "lat": 35.655115, "lng": 139.71188, "x": 1}, {"n": "渋谷区役所", "f": "渋谷区役所", "c": "区役所", "a": "", "lat": 35.663684, "lng": 139.697741, "x": 1}, {"n": "国士舘大学", "f": "国士舘大学", "c": "大学", "a": "", "lat": 35.647874, "lng": 139.653746, "x": 1}, {"n": "自衛隊中央病院", "f": "自衛隊中央病院", "c": "病院", "a": "", "lat": 35.645063, "lng": 139.684728, "x": 1}, {"n": "ホンダ本社", "f": "本田技研工業 虎ノ門本社", "c": "企業・団体", "a": "", "lat": 35.669103, "lng": 139.746158, "x": 1}, {"n": "消防学校", "f": "東京消防庁 消防学校", "c": "消防", "a": "", "lat": 35.67226, "lng": 139.673474, "x": 1}, {"n": "在日フランス大使館", "f": "在日フランス大使館", "c": "大使館", "a": "", "lat": 35.647224, "lng": 139.725474, "x": 1}, {"n": "TBS放送センター", "f": "TBS放送センター", "c": "企業・団体", "a": "", "lat": 35.671857, "lng": 139.734731, "x": 1}, {"n": "明治記念館", "f": "明治記念館", "c": "式場", "a": "", "lat": 35.678137, "lng": 139.721644, "x": 1}, {"n": "昭和女子大学", "f": "昭和女子大学", "c": "大学", "a": "", "lat": 35.643788, "lng": 139.675731, "x": 1}, {"n": "NTT東日本関東病院", "f": "NTT東日本関東病院", "c": "病院", "a": "", "lat": 35.630943, "lng": 139.725949, "x": 1}, {"n": "オーチャードホール", "f": "オーチャードホール", "c": "劇場・ホール", "a": "", "lat": 35.660662, "lng": 139.695145, "x": 1}, {"n": "ＮＨＫ放送センター", "f": "ＮＨＫ放送センター", "c": "企業・団体", "a": "", "lat": 35.665124, "lng": 139.696357, "x": 1}, {"n": "慶應義塾大学病院", "f": "慶應義塾大学病院", "c": "病院", "a": "東京都新宿区信濃町35", "lat": 35.681427, "lng": 139.718128, "x": 1}, {"n": "聖母病院", "f": "聖母病院", "c": "病院", "a": "", "lat": 35.720008, "lng": 139.694233, "x": 1}, {"n": "東京芸術劇場", "f": "東京芸術劇場", "c": "劇場・ホール", "a": "", "lat": 35.729842, "lng": 139.708075, "x": 1}, {"n": "富坂警察署", "f": "警視庁 富坂警察署", "c": "警察署", "a": "", "lat": 35.710508, "lng": 139.746984, "x": 1}, {"n": "セブン&アイ本社", "f": "㈱セブン＆アイ･ホールディングス 本社", "c": "企業・団体", "a": "", "lat": 35.685499, "lng": 139.733874, "x": 1}, {"n": "国立国際医療センター", "f": "国立健康危機管理研究機構 国立国際医療センター", "c": "病院", "a": "東京都新宿区戸山1-21-1", "lat": 35.701656, "lng": 139.716339, "x": 1}, {"n": "文化学園大学", "f": "文化学園大学", "c": "大学", "a": "", "lat": 35.685795, "lng": 139.693925, "x": 1}, {"n": "立教大学", "f": "立教大学", "c": "大学", "a": "", "lat": 35.730515, "lng": 139.702509, "x": 1}, {"n": "ホテル椿山荘東京", "f": "ホテル椿山荘東京", "c": "ホテル", "a": "", "lat": 35.711778, "lng": 139.725714, "x": 1}, {"n": "講談社", "f": "㈱講談社", "c": "企業・団体", "a": "", "lat": 35.71811, "lng": 139.72754, "x": 1}, {"n": "消防博物館", "f": "消防博物館 東京消防庁消防防災資料センター", "c": "美術館・博物館", "a": "", "lat": 35.68826, "lng": 139.719969, "x": 1}, {"n": "新宿区役所", "f": "新宿区役所", "c": "区役所", "a": "", "lat": 35.693941, "lng": 139.703386, "x": 1}, {"n": "ヒルトン東京", "f": "ヒルトン東京", "c": "ホテル", "a": "東京都新宿区西新宿6-6-2", "lat": 35.692583, "lng": 139.691189, "x": 1}, {"n": "キリンHD", "f": "キリンホールディングス株式会社", "c": "企業・団体", "a": "", "lat": 35.706717, "lng": 139.661796, "x": 1}, {"n": "駐日英国大使館", "f": "駐日英国大使館", "c": "大使館", "a": "", "lat": 35.686877, "lng": 139.744297, "x": 1}, {"n": "ニューオータニ", "f": "ホテルニューオータニ（東京）", "c": "ホテル", "a": "東京都千代田区紀尾井町4-1", "lat": 35.680427, "lng": 139.73439, "x": 1}, {"n": "都道府県会館", "f": "都道府県会館", "c": "企業・団体", "a": "", "lat": 35.67916, "lng": 139.738748, "x": 1}, {"n": "日本歯科大学", "f": "日本歯科大学", "c": "大学", "a": "", "lat": 35.697812, "lng": 139.745785, "x": 1}, {"n": "リーガロイヤルホテル東京", "f": "リーガロイヤルホテル東京", "c": "ホテル", "a": "", "lat": 35.710364, "lng": 139.722466, "x": 1}, {"n": "宝仙寺", "f": "宝仙寺", "c": "寺社・教会", "a": "", "lat": 35.698943, "lng": 139.679399, "x": 1}, {"n": "哲学堂公園", "f": "中野区立哲学堂公園", "c": "公園・庭園", "a": "", "lat": 35.722057, "lng": 139.674297, "x": 1}, {"n": "新宿ワシントンホテル 本館", "f": "新宿ワシントンホテル 本館", "c": "ホテル", "a": "", "lat": 35.686915, "lng": 139.693276, "x": 1}, {"n": "大正製薬本社", "f": "大正製薬本社", "c": "企業・団体", "a": "", "lat": 35.715135, "lng": 139.710107, "x": 1}, {"n": "立正佼成会大聖堂", "f": "立正佼成会大聖堂", "c": "寺社・教会", "a": "", "lat": 35.688583, "lng": 139.657861, "x": 1}, {"n": "都立大久保病院", "f": "東京都立大久保病院", "c": "病院", "a": "", "lat": 35.697127, "lng": 139.701509, "x": 1}, {"n": "日本女子大", "f": "日本女子大学 目白キャンパス", "c": "大学", "a": "", "lat": 35.717477, "lng": 139.720533, "x": 1}, {"n": "板橋区役所", "f": "板橋区役所", "c": "区役所", "a": "", "lat": 35.751153, "lng": 139.709492, "x": 1}, {"n": "護国寺", "f": "護国寺", "c": "寺社・教会", "a": "", "lat": 35.721744, "lng": 139.72568, "x": 1}, {"n": "花園神社", "f": "花園神社", "c": "寺社・教会", "a": "", "lat": 35.693531, "lng": 139.705328, "x": 1}, {"n": "六義園", "f": "六義園", "c": "公園・庭園", "a": "", "lat": 35.7331, "lng": 139.745734, "x": 1}, {"n": "旧古河庭園", "f": "旧古河庭園", "c": "公園・庭園", "a": "", "lat": 35.743033, "lng": 139.746769, "x": 1}, {"n": "学習院大学", "f": "学習院大学", "c": "大学", "a": "", "lat": 35.71868, "lng": 139.709305, "x": 1}, {"n": "とげぬき地蔵", "f": "とげぬき地蔵尊 高岩寺(曹洞宗 萬頂山)", "c": "寺社・教会", "a": "", "lat": 35.735832, "lng": 139.735465, "x": 1}, {"n": "王子警察署", "f": "王子警察署", "c": "警察署", "a": "", "lat": 35.759568, "lng": 139.738012, "x": 1}, {"n": "ホテルグランドヒル市ヶ谷", "f": "ホテルグランドヒル市ヶ谷", "c": "ホテル", "a": "", "lat": 35.691733, "lng": 139.733108, "x": 1}, {"n": "赤羽警察署", "f": "警視庁 赤羽警察署", "c": "警察署", "a": "", "lat": 35.774363, "lng": 139.733847, "x": 1}, {"n": "帝京大病院", "f": "帝京大学医学部附属病院", "c": "病院", "a": "東京都板橋区加賀2-11-1", "lat": 35.759014, "lng": 139.714135, "x": 1}, {"n": "淀橋市場", "f": "東京都中央卸売市場 淀橋市場", "c": "企業・団体", "a": "", "lat": 35.70566, "lng": 139.693637, "x": 1}, {"n": "飛鳥山公園", "f": "飛鳥山公園", "c": "公園・庭園", "a": "", "lat": 35.750472, "lng": 139.738823, "x": 1}, {"n": "ホテルメトロポリタン", "f": "ホテルメトロポリタン", "c": "ホテル", "a": "東京都豊島区西池袋1-6-1", "lat": 35.728523, "lng": 139.708002, "x": 1}, {"n": "早稲田大学", "f": "早稲田大学", "c": "大学", "a": "", "lat": 35.708733, "lng": 139.719649, "x": 1}, {"n": "日大板橋病院", "f": "日本大学医学部附属板橋病院", "c": "病院", "a": "東京都板橋区大谷口上町30-1", "lat": 35.749177, "lng": 139.691158, "x": 1}, {"n": "東京カテドラル", "f": "東京カテドラル聖マリア大聖堂", "c": "寺社・教会", "a": "", "lat": 35.714281, "lng": 139.726585, "x": 1}, {"n": "小石川植物園", "f": "小石川植物園", "c": "公園・庭園", "a": "", "lat": 35.719681, "lng": 139.744281, "x": 1}, {"n": "住宅金融支援機構", "f": "住宅金融支援機構本店", "c": "企業・団体", "a": "", "lat": 35.703359, "lng": 139.750686, "x": 1}, {"n": "伊勢丹 新宿店", "f": "伊勢丹 新宿店", "c": "商業施設", "a": "", "lat": 35.691574, "lng": 139.704647, "x": 1}, {"n": "京王プラザホテル", "f": "京王プラザホテル", "c": "ホテル", "a": "東京都新宿区西新宿2-2-1", "lat": 35.690254, "lng": 139.694252, "x": 1}, {"n": "大日本印刷", "f": "大日本印刷株式会社 本社", "c": "企業・団体", "a": "", "lat": 35.695713, "lng": 139.731132, "x": 1}, {"n": "都立豊島病院", "f": "東京都立豊島病院", "c": "病院", "a": "", "lat": 35.752848, "lng": 139.700984, "x": 1}, {"n": "味の素NTC", "f": "味の素ナショナルトレーニングセンター（NTC）", "c": "スポーツ", "a": "", "lat": 35.767786, "lng": 139.708006, "x": 1}, {"n": "サンシャインシティ", "f": "サンシャインシティ", "c": "商業施設", "a": "東京都豊島区東池袋3-1", "lat": 35.728971, "lng": 139.719541, "x": 1}, {"n": "東京医科大学病院", "f": "東京医科大学病院", "c": "病院", "a": "東京都新宿区西新宿6-7-1", "lat": 35.693765, "lng": 139.692512, "x": 1}, {"n": "アメリカ合衆国大使館", "f": "アメリカ合衆国大使館", "c": "大使館", "a": "", "lat": 35.668805, "lng": 139.743326, "x": 1}, {"n": "歌舞伎座", "f": "歌舞伎座", "c": "劇場・ホール", "a": "東京都中央区銀座4-12-15", "lat": 35.669425, "lng": 139.767745, "x": 1}, {"n": "都立墨東病院", "f": "東京都立墨東病院", "c": "病院", "a": "", "lat": 35.69461, "lng": 139.818798, "x": 1}, {"n": "新橋演舞場", "f": "新橋演舞場", "c": "劇場・ホール", "a": "", "lat": 35.666964, "lng": 139.766935, "x": 1}, {"n": "日本テレビタワー", "f": "日本テレビタワー", "c": "企業・団体", "a": "", "lat": 35.664366, "lng": 139.759944, "x": 1}, {"n": "東京タワー", "f": "東京タワー", "c": "施設", "a": "東京都港区芝公園4-2-8", "lat": 35.65858, "lng": 139.745433, "x": 1}, {"n": "銀座キャピタルホテル 茜", "f": "銀座キャピタルホテル 茜", "c": "ホテル", "a": "", "lat": 35.669493, "lng": 139.774549, "x": 1}, {"n": "靖國神社", "f": "靖國神社", "c": "寺社・教会", "a": "", "lat": 35.694136, "lng": 139.743849, "x": 1}, {"n": "明治座", "f": "明治座", "c": "劇場・ホール", "a": "", "lat": 35.687902, "lng": 139.786976, "x": 1}, {"n": "最高裁判所", "f": "最高裁判所", "c": "官庁・裁判所", "a": "", "lat": 35.680523, "lng": 139.743527, "x": 1}, {"n": "IHI本社", "f": "㈱IHI 本社", "c": "企業・団体", "a": "", "lat": 35.659032, "lng": 139.79322, "x": 1}, {"n": "慈恵医大病院", "f": "東京慈恵会医科大学附属病院（本院）", "c": "病院", "a": "", "lat": 35.662837, "lng": 139.749919, "x": 1}, {"n": "読売新聞", "f": "読売新聞 東京本社", "c": "企業・団体", "a": "", "lat": 35.68716, "lng": 139.764166, "x": 1}, {"n": "日枝神社", "f": "日枝神社", "c": "寺社・教会", "a": "", "lat": 35.674714, "lng": 139.739662, "x": 1}, {"n": "ホテルイースト21", "f": "ホテルイースト２１東京", "c": "ホテル", "a": "", "lat": 35.674496, "lng": 139.814412, "x": 1}, {"n": "帝国ホテル", "f": "帝国ホテル東京 本館", "c": "ホテル", "a": "東京都千代田区内幸町1-1-1", "lat": 35.672373, "lng": 139.75852, "x": 1}, {"n": "がんセンター中央病院", "f": "国立がん研究センター 中央病院", "c": "病院", "a": "", "lat": 35.665498, "lng": 139.768036, "x": 1}, {"n": "科学技術館", "f": "科学技術館サイエンスホール", "c": "美術館・博物館", "a": "", "lat": 35.691795, "lng": 139.7533, "x": 1}, {"n": "江東区総合区民センター", "f": "江東区総合区民センター", "c": "区役所", "a": "", "lat": 35.68903, "lng": 139.826987, "x": 1}, {"n": "インターコンチ東京ベイ", "f": "InterContinental Tokyo Bay by IHG", "c": "ホテル", "a": "", "lat": 35.653006, "lng": 139.762375, "x": 1}, {"n": "毎日新聞", "f": "毎日新聞社 東京本社", "c": "企業・団体", "a": "", "lat": 35.691203, "lng": 139.756836, "x": 1}, {"n": "江東区役所", "f": "江東区役所", "c": "区役所", "a": "", "lat": 35.672889, "lng": 139.81731, "x": 1}, {"n": "がん研有明病院", "f": "がん研有明病院", "c": "病院", "a": "", "lat": 35.634024, "lng": 139.794966, "x": 1}, {"n": "有明コロシアム", "f": "有明コロシアム", "c": "スポーツ", "a": "", "lat": 35.636475, "lng": 139.790095, "x": 1}, {"n": "深川警察署", "f": "警視庁 深川警察署", "c": "警察署", "a": "", "lat": 35.673627, "lng": 139.806236, "x": 1}, {"n": "ANAインターコンチ", "f": "ANAインターコンチネンタルホテル東京", "c": "ホテル", "a": "", "lat": 35.66829, "lng": 139.740831, "x": 1}, {"n": "築地本願寺", "f": "築地本願寺", "c": "寺社・教会", "a": "", "lat": 35.666486, "lng": 139.772284, "x": 1}, {"n": "測量年金会館", "f": "測量年金会館", "c": "企業・団体", "a": "", "lat": 35.706687, "lng": 139.730855, "x": 1}, {"n": "江東運転免許試験場", "f": "江東運転免許試験場", "c": "運転免許・運輸", "a": "", "lat": 35.668901, "lng": 139.822698, "x": 1}, {"n": "羽田空港 第1ターミナル", "f": "羽田空港 第1ターミナル", "c": "空港", "a": "東京都大田区羽田空港3-3-2", "m": "JAL・SKY", "lat": 35.5485, "lng": 139.7843, "x": 0}, {"n": "羽田空港 第2ターミナル", "f": "羽田空港 第2ターミナル", "c": "空港", "a": "東京都大田区羽田空港3-4-2", "m": "ANA・ADO", "lat": 35.5505, "lng": 139.7887, "x": 0}, {"n": "羽田空港 第3ターミナル", "f": "羽田空港 第3ターミナル", "c": "空港", "a": "東京都大田区羽田空港2-6-5", "m": "国際線", "lat": 35.544, "lng": 139.769, "x": 0}, {"n": "成田国際空港 第1ターミナル", "f": "成田国際空港 第1ターミナル", "c": "空港", "a": "千葉県成田市古込1-1", "m": "", "lat": 35.7647, "lng": 140.3864, "x": 0}, {"n": "成田国際空港 第2ターミナル", "f": "成田国際空港 第2ターミナル", "c": "空港", "a": "千葉県成田市古込1-1", "m": "", "lat": 35.7727, "lng": 140.3863, "x": 0}, {"n": "成田国際空港 第3ターミナル", "f": "成田国際空港 第3ターミナル", "c": "空港", "a": "千葉県成田市古込1-1", "m": "LCC", "lat": 35.7756, "lng": 140.3893, "x": 0}, {"n": "東京駅 丸の内南口", "f": "東京駅 丸の内南口", "c": "駅", "a": "東京都千代田区丸の内1-9-1", "m": "", "lat": 35.68, "lng": 139.766, "x": 0}, {"n": "東京駅 八重洲中央口", "f": "東京駅 八重洲中央口", "c": "駅", "a": "東京都千代田区丸の内1-9-1", "m": "八重洲側", "lat": 35.6812, "lng": 139.769, "x": 0}, {"n": "新宿駅 西口", "f": "新宿駅 西口", "c": "駅", "a": "東京都新宿区新宿3-38-1", "m": "", "lat": 35.6905, "lng": 139.6995, "x": 0}, {"n": "新宿駅 東口", "f": "新宿駅 東口", "c": "駅", "a": "東京都新宿区新宿3-38-1", "m": "", "lat": 35.6914, "lng": 139.701, "x": 0}, {"n": "新宿駅 南口", "f": "新宿駅 南口", "c": "駅", "a": "東京都新宿区新宿3-38-1", "m": "", "lat": 35.6883, "lng": 139.7005, "x": 0}, {"n": "渋谷駅", "f": "渋谷駅", "c": "駅", "a": "東京都渋谷区道玄坂1-1-1", "m": "", "lat": 35.658, "lng": 139.7016, "x": 0}, {"n": "池袋駅 東口", "f": "池袋駅 東口", "c": "駅", "a": "東京都豊島区南池袋1-28-2", "m": "", "lat": 35.7295, "lng": 139.7115, "x": 0}, {"n": "池袋駅 西口", "f": "池袋駅 西口", "c": "駅", "a": "東京都豊島区南池袋1-28-2", "m": "", "lat": 35.7295, "lng": 139.709, "x": 0}, {"n": "品川駅 高輪口", "f": "品川駅 高輪口", "c": "駅", "a": "東京都港区高輪3-26-27", "m": "", "lat": 35.6285, "lng": 139.738, "x": 0}, {"n": "品川駅 港南口", "f": "品川駅 港南口", "c": "駅", "a": "東京都港区高輪3-26-27", "m": "港南側", "lat": 35.629, "lng": 139.7405, "x": 0}, {"n": "上野駅", "f": "上野駅", "c": "駅", "a": "東京都台東区上野7-1-1", "m": "", "lat": 35.7138, "lng": 139.7773, "x": 0}, {"n": "新橋駅 SL広場", "f": "新橋駅 SL広場", "c": "駅", "a": "東京都港区新橋2丁目", "m": "", "lat": 35.6663, "lng": 139.7579, "x": 0}, {"n": "六本木駅", "f": "六本木駅", "c": "駅", "a": "東京都港区六本木6丁目", "m": "", "lat": 35.6628, "lng": 139.7314, "x": 0}, {"n": "高田馬場駅", "f": "高田馬場駅", "c": "駅", "a": "東京都新宿区高田馬場1丁目", "m": "", "lat": 35.7126, "lng": 139.7038, "x": 0}, {"n": "中野駅", "f": "中野駅", "c": "駅", "a": "東京都中野区中野5丁目", "m": "", "lat": 35.7056, "lng": 139.6657, "x": 0}, {"n": "吉祥寺駅", "f": "吉祥寺駅", "c": "駅", "a": "東京都武蔵野市吉祥寺南町1丁目", "m": "", "lat": 35.7031, "lng": 139.5797, "x": 0}, {"n": "練馬駅", "f": "練馬駅", "c": "駅", "a": "東京都練馬区練馬1丁目", "m": "", "lat": 35.7377, "lng": 139.6542, "x": 0}, {"n": "中村橋駅", "f": "中村橋駅", "c": "駅", "a": "東京都練馬区貫井1丁目", "m": "", "lat": 35.7368, "lng": 139.6377, "x": 0}, {"n": "練馬高野台駅", "f": "練馬高野台駅", "c": "駅", "a": "東京都練馬区高野台1丁目", "m": "", "lat": 35.7406, "lng": 139.617, "x": 0}, {"n": "石神井公園駅", "f": "石神井公園駅", "c": "駅", "a": "東京都練馬区石神井町3丁目", "m": "", "lat": 35.7436, "lng": 139.6066, "x": 0}, {"n": "大泉学園駅", "f": "大泉学園駅", "c": "駅", "a": "東京都練馬区東大泉1丁目", "m": "", "lat": 35.7495, "lng": 139.5864, "x": 0}, {"n": "光が丘駅", "f": "光が丘駅", "c": "駅", "a": "東京都練馬区光が丘2丁目", "m": "", "lat": 35.7582, "lng": 139.629, "x": 0}, {"n": "江古田駅", "f": "江古田駅", "c": "駅", "a": "東京都練馬区旭丘1丁目", "m": "", "lat": 35.7378, "lng": 139.6729, "x": 0}, {"n": "成増駅", "f": "成増駅", "c": "駅", "a": "東京都板橋区成増2丁目", "m": "", "lat": 35.7776, "lng": 139.6316, "x": 0}, {"n": "練馬総合病院", "f": "練馬総合病院", "c": "病院", "a": "東京都練馬区旭丘1-24-1", "m": "", "lat": 35.7346, "lng": 139.669, "x": 0}, {"n": "順天堂大学医学部附属練馬病院", "f": "順天堂大学医学部附属練馬病院", "c": "病院", "a": "東京都練馬区高野台3-1-10", "m": "", "lat": 35.7413, "lng": 139.6188, "x": 0}, {"n": "練馬光が丘病院", "f": "練馬光が丘病院", "c": "病院", "a": "東京都練馬区光が丘2-5-1", "m": "", "lat": 35.76, "lng": 139.63, "x": 0}, {"n": "東京女子医科大学病院", "f": "東京女子医科大学病院", "c": "病院", "a": "東京都新宿区河田町8-1", "m": "", "lat": 35.698, "lng": 139.72, "x": 0}, {"n": "東京大学医学部附属病院", "f": "東京大学医学部附属病院", "c": "病院", "a": "東京都文京区本郷7-3-1", "m": "", "lat": 35.711, "lng": 139.764, "x": 0}, {"n": "虎の門病院", "f": "虎の門病院", "c": "病院", "a": "東京都港区虎ノ門2-2-2", "m": "", "lat": 35.669, "lng": 139.746, "x": 0}, {"n": "ザ・リッツ・カールトン東京", "f": "ザ・リッツ・カールトン東京", "c": "ホテル", "a": "東京都港区赤坂9-7-1", "m": "ミッドタウン内", "lat": 35.666, "lng": 139.731, "x": 0}, {"n": "パーク ハイアット 東京", "f": "パーク ハイアット 東京", "c": "ホテル", "a": "東京都新宿区西新宿3-7-1-2", "m": "", "lat": 35.6855, "lng": 139.6907, "x": 0}, {"n": "ザ・ペニンシュラ東京", "f": "ザ・ペニンシュラ東京", "c": "ホテル", "a": "東京都千代田区有楽町1-8-1", "m": "", "lat": 35.675, "lng": 139.76, "x": 0}, {"n": "マンダリン オリエンタル 東京", "f": "マンダリン オリエンタル 東京", "c": "ホテル", "a": "東京都中央区日本橋室町2-1-1", "m": "", "lat": 35.687, "lng": 139.773, "x": 0}, {"n": "ザ・プリンス パークタワー東京", "f": "ザ・プリンス パークタワー東京", "c": "ホテル", "a": "東京都港区芝公園4-8-1", "m": "", "lat": 35.655, "lng": 139.748, "x": 0}, {"n": "グランドプリンスホテル新高輪", "f": "グランドプリンスホテル新高輪", "c": "ホテル", "a": "東京都港区高輪3-13-1", "m": "", "lat": 35.626, "lng": 139.733, "x": 0}, {"n": "サンシャインシティプリンスホテル", "f": "サンシャインシティプリンスホテル", "c": "ホテル", "a": "東京都豊島区東池袋3-1-5", "m": "", "lat": 35.729, "lng": 139.72, "x": 0}, {"n": "日本武道館", "f": "日本武道館", "c": "スポーツ", "a": "東京都千代田区北の丸公園2-3", "m": "", "lat": 35.6933, "lng": 139.7499, "x": 0}, {"n": "国立競技場", "f": "国立競技場", "c": "スポーツ", "a": "東京都新宿区霞ヶ丘町10-1", "m": "", "lat": 35.678, "lng": 139.7146, "x": 0}, {"n": "東京ビッグサイト", "f": "東京ビッグサイト", "c": "施設", "a": "東京都江東区有明3-11-1", "m": "", "lat": 35.63, "lng": 139.794, "x": 0}, {"n": "六本木ヒルズ", "f": "六本木ヒルズ", "c": "商業施設", "a": "東京都港区六本木6-10-1", "m": "", "lat": 35.6605, "lng": 139.7292, "x": 0}, {"n": "東京スカイツリー", "f": "東京スカイツリー", "c": "施設", "a": "東京都墨田区押上1-1-2", "m": "", "lat": 35.7101, "lng": 139.8107, "x": 0}, {"n": "ワーナー ブラザース スタジオツアー東京", "f": "ワーナー ブラザース スタジオツアー東京", "c": "施設", "a": "東京都練馬区春日町1-1-7", "m": "", "lat": 35.744, "lng": 139.648, "x": 0}, {"n": "としまえん跡 練馬城址公園", "f": "としまえん跡 練馬城址公園", "c": "公園・庭園", "a": "東京都練馬区向山3丁目", "m": "", "lat": 35.743, "lng": 139.646, "x": 0}, {"n": "東京都庁", "f": "東京都庁", "c": "官庁・裁判所", "a": "東京都新宿区西新宿2-8-1", "m": "", "lat": 35.6896, "lng": 139.6921, "x": 0}, {"n": "国会議事堂", "f": "国会議事堂", "c": "官庁・裁判所", "a": "東京都千代田区永田町1-7-1", "m": "", "lat": 35.6759, "lng": 139.745, "x": 0}, {"n": "練馬区役所", "f": "練馬区役所", "c": "区役所", "a": "東京都練馬区豊玉北6-12-1", "m": "", "lat": 35.7357, "lng": 139.6518, "x": 0}, {"n": "豊島区役所", "f": "豊島区役所", "c": "区役所", "a": "東京都豊島区南池袋2-45-1", "m": "", "lat": 35.7268, "lng": 139.713, "x": 0}, {"n": "練馬警察署", "f": "練馬警察署", "c": "警察署", "a": "東京都練馬区豊玉北5丁目", "m": "", "lat": 35.736, "lng": 139.653, "x": 0}];
+const CAT = {
+ "空港":["✈️","#0284c7"],"駅":["🚉","#16a34a"],"病院":["🏥","#d93025"],"ホテル":["🛏️","#7c3aed"],"大学":["🎓","#92400e"],
+ "警察署":["👮","#1d4ed8"],"消防":["🚒","#c2410c"],"区役所":["🏛️","#475569"],"官庁・裁判所":["⚖️","#334155"],"大使館":["🚩","#0e7490"],
+ "運転免許・運輸":["🚕","#a16207"],"郵便局":["📮","#b91c1c"],"寺社・教会":["⛩️","#b45309"],"公園・庭園":["🌳","#15803d"],
+ "美術館・博物館":["🖼️","#be185d"],"劇場・ホール":["🎭","#9d174d"],"式場":["💒","#db2777"],"スポーツ":["🏟️","#0369a1"],
+ "商業施設":["🛍️","#ca8a04"],"施設":["📍","#0f766e"],"企業・団体":["🏢","#4b5563"]
+};
+const ORDER = Object.keys(CAT);
+const S = {get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+let off = new Set(S.get("tm_off",[]));
+let favs = new Set(S.get("tm_favs",[]));
+let me = null; // 現在地 {lat,lng}
+
+/* ---------- ナビURL ---------- */
+const dest = p => p.x ? p.lat+","+p.lng : p.f;
+const gUrl = p => "https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination="+encodeURIComponent(dest(p));
+const aUrl = p => "https://maps.apple.com/?dirflg=d&daddr="+encodeURIComponent(dest(p));
+// Yahoo!カーナビ公式URLスキーム（目的地の緯度・経度・名前）
+const yUrl = p => "yjcarnavi://navi/select?lat="+p.lat+"&lon="+p.lng+"&name="+encodeURIComponent(p.n);
+const APPS = {
+  google:{label:"Googleマップ",url:gUrl},
+  yahoo:{label:"Yahoo!カーナビ",url:yUrl},
+  apple:{label:"Appleマップ",url:aUrl},
+  device:{label:"端末のアプリで選ぶ",url:p=>"geo:"+p.lat+","+p.lng+"?q="+p.lat+","+p.lng+"("+encodeURIComponent(p.n)+")"},
+};
+/* 手動追加アプリ：URLの形を1回登録すると直接起動できる
+   安全のため、javascript: などの危険な形式は登録できない。値は必ずエンコードして差し込む */
+const BLOCK=/^(javascript|data|vbscript|file|blob|about|chrome|intent):/i;
+function validTpl(t){
+  if(typeof t!=="string"||t.length>400)return false;
+  const m=t.match(/^([a-z][a-z0-9+.\-]*):/i);
+  if(!m||BLOCK.test(t))return false;
+  return /\{(lat|lng|name)\}/.test(t);
+}
+function fill(t,p){return t.replace(/\{lat\}/g,String(p.lat)).replace(/\{lng\}/g,String(p.lng)).replace(/\{name\}/g,encodeURIComponent(p.n))}
+function loadCustom(){
+  Object.keys(APPS).filter(k=>k.startsWith("c_")).forEach(k=>delete APPS[k]);
+  (S.get("tm_custom",[])||[]).forEach((c,i)=>{if(c&&validTpl(c.t)&&typeof c.n==="string")APPS["c_"+i]={label:c.n.slice(0,20),url:p=>fill(c.t,p),custom:true}});
+}
+loadCustom();
+let mainApp = S.get("tm_app","google"); if(!APPS[mainApp]) mainApp="google";
+function km(a,b){const r=Math.PI/180,dLa=(b.lat-a.lat)*r,dLo=(b.lng-a.lng)*r;const h=Math.sin(dLa/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLo/2)**2;return 12742*Math.asin(Math.sqrt(h))}
+const fmtDur = sec => {const t=Math.max(1,Math.round(sec/60)),h=Math.floor(t/60),m=t%60;return h?h+"時間"+m+"分":m+"分"};
+const fmt = d => d<1 ? Math.round(d*1000)+"m" : (d<10?d.toFixed(1):Math.round(d))+"km";
+
+let tt; function toast(t){const el=document.getElementById("toast");el.textContent=t;el.hidden=false;clearTimeout(tt);tt=setTimeout(()=>el.hidden=true,5000)}
+function copyName(p,app){
+  const t=p.f;
+  const ok=()=>toast("「"+t+"」をコピーしました。"+app+"を開いて目的地に貼り付けてください。");
+  try{navigator.clipboard.writeText(t).then(ok,()=>toast("コピーできませんでした。施設名："+t))}catch(e){toast("施設名："+t)}
+}
+
+/* ---------- 地図 ---------- */
+const map = new maplibregl.Map({
+  container:"map", style:"https://tiles.openfreemap.org/styles/positron",
+  center:[139.70,35.69], zoom:11.5, maxPitch:0, dragRotate:false, attributionControl:{compact:true},
+  localIdeographFontFamily:"'Hiragino Sans','Noto Sans JP','Yu Gothic',sans-serif"
+});
+map.touchZoomRotate.disableRotation();
+const geo = new maplibregl.GeolocateControl({positionOptions:{enableHighAccuracy:true},trackUserLocation:true,showAccuracyCircle:false});
+map.addControl(geo,"top-right");
+map.addControl(new maplibregl.NavigationControl({showCompass:false}),"top-right");
+geo.on("geolocate",e=>{me={lat:e.coords.latitude,lng:e.coords.longitude}});
+
+let FONT=["Noto Sans Bold"];
+function makeIcon(emo,col){
+  const z=2,R=17*z,c=document.createElement("canvas");c.width=c.height=R*2+6;
+  const x=c.getContext("2d"),m=c.width/2;
+  x.beginPath();x.arc(m,m,R,0,Math.PI*2);x.fillStyle=col;x.fill();
+  x.lineWidth=3*z;x.strokeStyle="#fff";x.stroke();
+  x.font=(18*z)+"px 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif";
+  x.textAlign="center";x.textBaseline="middle";x.fillText(emo,m,m+1*z);
+  return {img:x.getImageData(0,0,c.width,c.height),z};
+}
+const notOff=()=>["!",["in",["get","c"],["literal",[...off]]]];
+map.on("load",()=>{
+  const layers=map.getStyle().layers;
+  const firstSymbol=(layers.find(l=>l.type==="symbol")||{}).id;
+  const anyText=layers.find(l=>l.type==="symbol"&&l.layout&&l.layout["text-font"]);
+  if(anyText){const f=anyText.layout["text-font"];FONT=Array.isArray(f)&&typeof f[0]==="string"?f.map(n=>n.replace("Regular","Bold").replace("Italic","Bold")):FONT}
+  layers.forEach(l=>{
+    if(l.type!=="symbol")return;
+    const tf=map.getLayoutProperty(l.id,"text-field");
+    if(!tf||JSON.stringify(tf).includes("ref"))return;
+    // 元の道路名は消して、強調版に置き換える
+    if(l["source-layer"]==="transportation_name"){map.setLayoutProperty(l.id,"visibility","none");return}
+    map.setLayoutProperty(l.id,"text-field",["coalesce",["get","name:ja"],["get","name"]]);
+  });
+  // 幹線道路・高速道路（控えめな色）
+  const w=(a,b,c)=>["interpolate",["linear"],["zoom"],8,a,12,b,16,c];
+  map.addLayer({id:"x-trunk",type:"line",source:"openmaptiles","source-layer":"transportation",
+    filter:["in",["get","class"],["literal",["trunk","primary"]]],layout:{"line-cap":"round","line-join":"round"},
+    paint:{"line-color":"#f0b429","line-opacity":0.6,"line-width":w(1,3,9)}},firstSymbol);
+  map.addLayer({id:"x-motorway",type:"line",source:"openmaptiles","source-layer":"transportation",
+    filter:["==",["get","class"],"motorway"],layout:{"line-cap":"round","line-join":"round"},
+    paint:{"line-color":"#4f7fe8","line-opacity":0.6,"line-width":w(1.4,3.5,10)}},firstSymbol);
+  // 道路名（色フチで強調）
+  const roadName=(id,cls,halo,minz)=>map.addLayer({id,type:"symbol",source:"openmaptiles","source-layer":"transportation_name",minzoom:minz,
+    filter:["all",["in",["get","class"],["literal",cls]],["has","name"]],
+    layout:{"symbol-placement":"line","text-field":["coalesce",["get","name:ja"],["get","name"]],"text-font":FONT,
+      "text-size":["interpolate",["linear"],["zoom"],12,12,16,15],"symbol-spacing":350,"text-max-angle":30,"text-padding":4},
+    paint:{"text-color":"#1d1c19","text-halo-color":halo,"text-halo-width":2.6}});
+  roadName("x-name-trunk",["trunk","primary"],"#fde68a",12);
+  roadName("x-name-motorway",["motorway"],"#c7d7fb",11);
+
+  // 施設アイコン
+  Object.entries(CAT).forEach(([c,[e,col]])=>{const {img,z}=makeIcon(e,col);map.addImage("cat-"+c,img,{pixelRatio:z})});
+  map.addSource("fac",{type:"geojson",data:{type:"FeatureCollection",features:PTS.map((p,i)=>({type:"Feature",id:i,
+    properties:{i,n:p.n,c:p.c,icon:"cat-"+(CAT[p.c]?p.c:"施設")},geometry:{type:"Point",coordinates:[p.lng,p.lat]}}))}});
+  map.addSource("route",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+  map.addLayer({id:"route-case",type:"line",source:"route",layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":"#ffffff","line-width":9,"line-opacity":0.9}},firstSymbol);
+  map.addLayer({id:"route",type:"line",source:"route",
+    paint:{"line-color":["get","col"],"line-width":["case",["==",["get","on"],1],6,4],"line-opacity":["case",["==",["get","on"],1],0.95,0.6]},
+    layout:{"line-sort-key":["get","on"],"line-cap":"round","line-join":"round"}},firstSymbol);
+  // 無料トイレ
+  {const {img,z}=makeIcon("🚻","#0e7490");map.addImage("toilet-ok",img,{pixelRatio:z});
+   const u=makeIcon("🚻","#64748b");map.addImage("toilet-unk",u.img,{pixelRatio:u.z});}
+  map.addSource("toilet",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+  map.addLayer({id:"toilet",type:"symbol",source:"toilet",minzoom:12,
+    layout:{"icon-image":["case",["==",["get","free"],1],"toilet-ok","toilet-unk"],"icon-size":["interpolate",["linear"],["zoom"],12,0.6,16,0.85],"icon-allow-overlap":true,
+      "text-field":["step",["zoom"],"",15.5,["get","n"]],"text-font":FONT,"text-size":12,"text-anchor":"top","text-offset":[0,1.2],"text-optional":true},
+    paint:{"text-color":"#0e7490","text-halo-color":"#fff","text-halo-width":2.2}});
+  map.on("click","toilet",e=>{const f=e.features[0];if(f)toiletSheet(f.properties.k)});
+  map.on("mouseenter","toilet",()=>map.getCanvas().style.cursor="pointer");
+  map.on("mouseleave","toilet",()=>map.getCanvas().style.cursor="");
+  map.setLayoutProperty("toilet","visibility",toiletsOn?"visible":"none");
+  map.on("moveend",()=>{if(toiletsOn)queueToilets()});
+  if(toiletsOn)queueToilets();
+  map.addSource("sel",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+  map.addLayer({id:"sel",type:"circle",source:"sel",paint:{"circle-radius":24,"circle-color":"#f2b705","circle-opacity":0.45,"circle-stroke-color":"#f2b705","circle-stroke-width":3}});
+  map.addLayer({id:"fac",type:"symbol",source:"fac",filter:notOff(),
+    layout:{"icon-image":["get","icon"],"icon-size":["interpolate",["linear"],["zoom"],10,0.75,14,1,17,1.15],
+      "icon-allow-overlap":true,"icon-ignore-placement":false,
+      "text-field":["step",["zoom"],"",12.3,["get","n"]],"text-font":FONT,
+      "text-size":["interpolate",["linear"],["zoom"],12.3,12.5,15,14.5,17,16],
+      "text-variable-anchor":["top","bottom","right","left"],"text-radial-offset":1.35,"text-justify":"auto",
+      "text-optional":true,"text-padding":2,"text-max-width":9,"symbol-sort-key":["get","i"]},
+    paint:{"text-color":"#111","text-halo-color":"#ffffff","text-halo-width":2.4,"text-halo-blur":0.2}});
+  map.on("click","fac",e=>{const f=e.features[0];if(f)select(f.properties.i)});
+  map.on("mouseenter","fac",()=>map.getCanvas().style.cursor="pointer");
+  map.on("mouseleave","fac",()=>map.getCanvas().style.cursor="");
+  geo.trigger();
+});
+function applyFilter(){if(map.getLayer("fac"))map.setFilter("fac",notOff())}
+function setSel(i){const src=map.getSource("sel");if(!src)return;
+  src.setData({type:"FeatureCollection",features:i<0?[]:[{type:"Feature",properties:{},geometry:{type:"Point",coordinates:[PTS[i].lng,PTS[i].lat]}}]})}
+
+/* ---------- 絞り込み ---------- */
+let toiletsOn=S.get("tm_toilet",false);
+function renderChips(){
+  const el=document.getElementById("chips");el.innerHTML="";
+  const cats=ORDER.filter(c=>PTS.some(p=>p.c===c));const shown=cats.filter(c=>!off.has(c)).length;
+  const f=document.createElement("button");f.className="chip";f.type="button";f.textContent="☰ 絞り込み（"+shown+"/"+cats.length+"）";
+  f.onclick=showFilter;el.appendChild(f);
+  const fv=document.createElement("button");fv.className="chip";fv.type="button";fv.textContent="★ お気に入り";
+  fv.onclick=()=>showList("★ お気に入り",PTS.map((p,i)=>i).filter(i=>favs.has(PTS[i].n)));el.appendChild(fv);
+  const t=document.createElement("button");t.className="chip";t.type="button";t.textContent="🚻 無料トイレ";
+  t.setAttribute("aria-pressed",toiletsOn);t.onclick=()=>setToilets(!toiletsOn);el.appendChild(t);
+}
+function setToilets(v){toiletsOn=v;S.set("tm_toilet",v);renderChips();
+  if(map.getLayer("toilet"))map.setLayoutProperty("toilet","visibility",v?"visible":"none");
+  if(v){if(map.getZoom()<12)toast("トイレは地図を拡大すると表示されます。");queueToilets()}}
+function showFilter(){
+  sheet.classList.remove("min");sheet.innerHTML="";cur=-1;setSel(-1);clearRoute();
+  const h=document.createElement("div");h.className="sh";const t=document.createElement("h2");t.textContent="表示するカテゴリ";
+  const x=document.createElement("button");x.className="x";x.type="button";x.textContent="✕";x.setAttribute("aria-label","閉じる");x.onclick=closeSheet;h.append(t,x);
+  const bar=document.createElement("div");bar.className="alt";bar.style.gridTemplateColumns="1fr 1fr";
+  const cats=ORDER.filter(c=>PTS.some(p=>p.c===c));
+  const allOn=document.createElement("button");allOn.type="button";allOn.textContent="すべて表示";
+  allOn.onclick=()=>{off.clear();save();showFilter()};
+  const allOff=document.createElement("button");allOff.type="button";allOff.textContent="すべて隠す";
+  allOff.onclick=()=>{cats.forEach(c=>off.add(c));save();showFilter()};
+  bar.append(allOn,allOff);
+  const grid=document.createElement("div");grid.style.cssText="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:2px 10px";
+  const save=()=>{S.set("tm_off",[...off]);applyFilter();renderChips()};
+  cats.forEach((c,k)=>{
+    const lb=document.createElement("label");lb.style.cssText="display:flex;align-items:center;gap:8px;padding:9px 4px;font-size:15px;cursor:pointer";
+    const cb=document.createElement("input");cb.type="checkbox";cb.id="cat"+k;cb.checked=!off.has(c);cb.style.cssText="width:20px;height:20px";
+    cb.onchange=()=>{cb.checked?off.delete(c):off.add(c);save()};
+    const n=PTS.filter(p=>p.c===c).length;
+    lb.append(cb,CAT[c][0]+" "+c+"（"+n+"）");grid.append(lb);
+  });
+  const tl=document.createElement("label");tl.style.cssText="display:flex;align-items:center;gap:8px;padding:9px 4px;font-size:15px;border-top:1px solid var(--line);margin-top:4px";
+  const tc=document.createElement("input");tc.type="checkbox";tc.id="catToilet";tc.checked=toiletsOn;tc.style.cssText="width:20px;height:20px";
+  tc.onchange=()=>setToilets(tc.checked);
+  tl.append(tc,"🚻 無料トイレ（OpenStreetMapのデータ）");
+  sheet.append(h,bar,grid,tl);sheet.style.maxHeight="78vh";sheet.style.overflow="auto";sheet.hidden=false;
+}
+renderChips();
+
+/* ---------- 無料トイレ（Overpass API・表示範囲だけ取得） ---------- */
+const TOILETS=[];const TCELL=0.04;const tDone=new Set();let tBusy=false,tTimer=null;
+function queueToilets(){clearTimeout(tTimer);tTimer=setTimeout(loadToilets,1200)}
+async function loadToilets(){
+  if(!toiletsOn||tBusy||map.getZoom()<12)return;
+  const b=map.getBounds();
+  const x0=Math.floor(b.getWest()/TCELL),x1=Math.floor(b.getEast()/TCELL),y0=Math.floor(b.getSouth()/TCELL),y1=Math.floor(b.getNorth()/TCELL);
+  const need=[];for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++)if(!tDone.has(x+":"+y))need.push([x,y]);
+  if(!need.length)return;
+  if(need.length>12){toast("トイレを表示するには、もう少し地図を拡大してください。");return}
+  const xs=need.map(n=>n[0]),ys=need.map(n=>n[1]);
+  const s_=Math.min(...ys)*TCELL,w_=Math.min(...xs)*TCELL,n_=(Math.max(...ys)+1)*TCELL,e_=(Math.max(...xs)+1)*TCELL;
+  const bb=[s_,w_,n_,e_].map(v=>v.toFixed(4)).join(",");
+  const q=`[out:json][timeout:20];(node[amenity=toilets](${bb});way[amenity=toilets](${bb}););out center tags;`;
+  tBusy=true;
+  try{
+    const r=await fetch(OVERPASS,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"},referrerPolicy:"no-referrer"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const j=await r.json();
+    (j.elements||[]).forEach(e=>{
+      const t=e.tags||{};const lat=e.lat!=null?e.lat:(e.center&&e.center.lat),lng=e.lon!=null?e.lon:(e.center&&e.center.lon);if(lat==null)return;
+      if(/^(private|customers|no|delivery)$/.test(t.access||""))return;
+      if(/^yes$/.test(t.fee||"")||t.charge)return;
+      const id=e.type+e.id;if(TOILETS.some(o=>o.id===id))return;
+      TOILETS.push({id,lat,lng,free:t.fee==="no"?1:0,n:(t["name:ja"]||t.name||"公衆トイレ").slice(0,30),
+        hours:t.opening_hours||"",wheel:t.wheelchair||"",diaper:t.changing_table||t.diaper||""});
+    });
+    need.forEach(n=>tDone.add(n[0]+":"+n[1]));
+    const src=map.getSource("toilet");
+    if(src)src.setData({type:"FeatureCollection",features:TOILETS.map((o,k)=>({type:"Feature",properties:{k,free:o.free,n:o.n},geometry:{type:"Point",coordinates:[o.lng,o.lat]}}))});
+  }catch(e){toast("トイレ情報を取得できませんでした。少し待ってから地図を動かしてください。")}
+  finally{tBusy=false}
+}
+function toiletSheet(k){
+  const o=TOILETS[k];if(!o)return;cur=-1;setSel(-1);clearRoute();
+  sheet.classList.remove("min");sheet.innerHTML="";
+  const h=document.createElement("div");h.className="sh";const t=document.createElement("h2");t.textContent="🚻 "+o.n;
+  const x=document.createElement("button");x.className="x";x.type="button";x.textContent="✕";x.setAttribute("aria-label","閉じる");x.onclick=closeSheet;h.append(t,x);
+  const meta=document.createElement("div");meta.className="meta";
+  const lines=[o.free?"無料（データで確認済み）":"料金の登録なし（公衆トイレは多くが無料）"];
+  if(me)lines.push("現在地から約"+fmt(km(me,o))+"（直線）");
+  if(o.hours)lines.push("利用時間："+o.hours);
+  if(o.wheel==="yes")lines.push("車いす対応");
+  if(/yes/.test(o.diaper))lines.push("おむつ替え台あり");
+  lines.forEach((l,i)=>{if(i)meta.append(document.createElement("br"));meta.append(l)});
+  const p={n:o.n,f:o.n,lat:o.lat,lng:o.lng,x:1};
+  const go=document.createElement("a");go.className="go";go.href=APPS[mainApp].url(p);go.target="_blank";go.rel="noopener";go.textContent="🚖 "+APPS[mainApp].label+"でナビ開始";
+  const note=document.createElement("div");note.className="note";note.style.fontSize="11px";note.style.color="var(--muted)";
+  note.textContent="トイレの情報は © OpenStreetMap contributors。実際の状況と異なる場合があります。";
+  sheet.append(h,meta,go,note);sheet.style.maxHeight="78vh";sheet.style.overflow="auto";sheet.hidden=false;
+}
+
+/* ---------- シート ---------- */
+const sheet=document.getElementById("sheet");
+let cur=-1;
+function select(i,fly){
+  const p=PTS[i];if(cur!==i)clearRoute();cur=i;
+  setSel(i);
+  if(fly)map.flyTo({center:[p.lng,p.lat],zoom:Math.max(map.getZoom(),15),speed:1.6});
+  sheet.innerHTML="";
+  const h=document.createElement("div");h.className="sh";
+  const t=document.createElement("h2");t.textContent=CAT[p.c][0]+" "+p.n;
+  const x=document.createElement("button");x.className="x";x.type="button";x.textContent="✕";x.setAttribute("aria-label","閉じる");
+  x.onclick=closeSheet;
+  const mn=document.createElement("button");mn.className="x";mn.type="button";
+  const setMin=v=>{sheet.classList.toggle("min",v);mn.textContent=v?"▲":"▼";mn.setAttribute("aria-label",v?"パネルを開く":"パネルを隠して地図を見る")};
+  mn.onclick=()=>setMin(!sheet.classList.contains("min"));setMin(false);
+  t.style.cursor="pointer";t.onclick=()=>{if(sheet.classList.contains("min"))setMin(false)};
+  h.append(t,mn,x);
+  const meta=document.createElement("div");meta.className="meta";
+  const bits=[p.c];if(me)bits.push("現在地から約"+fmt(km(me,p))+"（直線）");
+  meta.append(bits.join(" · "));
+  if(p.f!==p.n){meta.append(document.createElement("br"),p.f)}
+  if(p.a){meta.append(document.createElement("br"),p.a)}
+  if(!p.x){meta.append(document.createElement("br"),"※ピン位置は目安。ナビは施設名で検索します")}
+  const go=document.createElement("a");go.className="go";go.href=APPS[mainApp].url(p);go.target="_blank";go.rel="noopener";
+  go.textContent="🚖 "+APPS[mainApp].label+"でナビ開始";
+  const alt=document.createElement("div");alt.className="alt";
+  Object.entries(APPS).filter(([k])=>k!==mainApp).forEach(([k,A])=>{const l=document.createElement("a");l.href=A.url(p);l.target="_blank";l.rel="noopener";l.textContent=A.label;alt.append(l)});
+  const n=document.createElement("button");n.type="button";n.textContent="カーナビタイム（コピー）";n.onclick=()=>copyName(p,"カーナビタイム");
+  const fv=document.createElement("button");fv.type="button";const on=favs.has(p.n);fv.textContent=on?"★ 登録済み":"☆ お気に入り";
+  fv.onclick=()=>{favs.has(p.n)?favs.delete(p.n):favs.add(p.n);S.set("tm_favs",[...favs]);select(i)};
+  alt.append(n,fv);
+  const set=document.createElement("label");set.className="meta";set.style.cssText="display:flex;gap:8px;align-items:center";
+  set.append("大きいボタンのアプリ：");
+  const sel=document.createElement("select");sel.id="mainApp";sel.style.cssText="font:inherit;padding:4px 6px;border-radius:8px";
+  Object.entries(APPS).forEach(([k,A])=>{const o=document.createElement("option");o.value=k;o.textContent=A.label;sel.append(o)});
+  sel.value=mainApp;sel.onchange=()=>{mainApp=sel.value;S.set("tm_app",mainApp);select(i)};set.append(sel);
+  const add=document.createElement("button");add.type="button";add.className="x";add.style.cssText="width:auto;border-radius:8px;padding:0 10px;font:inherit;font-size:13px";
+  add.textContent="アプリを追加";add.onclick=()=>appForm(i);set.append(add);
+  const ver=document.createElement("div");ver.className="meta";ver.style.cssText="font-size:11px;text-align:right";ver.textContent="バージョン "+VERSION;
+  const rbox=document.createElement("div");rbox.className="route";
+  sheet.append(h,meta,go,rbox,alt,set,ver);sheet.style.maxHeight="78vh";sheet.style.overflow="auto";sheet.hidden=false;
+  autoRoute(i,rbox);
+}
+/* ---------- 通る道（一般道のみ・OSM経路計算） ---------- */
+let lastReq=0, routeTimer=null, routeToken=0;
+const ROUTE_API="https://routing.openstreetmap.de/routed-car/route/v1/driving/";
+const VALHALLA="https://valhalla1.openstreetmap.de/route?json=";
+const OVERPASS="https://overpass-api.de/api/interpreter";
+const RCACHE=new Map();
+const MAJOR=/通り|通|街道|国道|バイパス|環状|大通|線$|道路|道$/;
+const SKIP=/出口|入口|ランプ|IC$|JCT$|ジャンクション|インターチェンジ/;
+const ROADCOL=["#2563eb","#db2777","#059669","#d97706","#7c3aed","#0891b2","#dc2626","#65a30d","#c026d3","#0f766e"];
+const OTHERCOL="#94a3b8";
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function roadLabel(st){return (st.name&&st.name.trim())||(st.ref&&st.ref.trim())||""}
+const isNum=n=>/^[0-9A-Za-z\-\s]+$/.test(n);
+function majorRoads(steps){
+  const segs=[];
+  steps.forEach(st=>{const n=roadLabel(st);const d=st.distance||0;if(!d)return;
+    const last=segs[segs.length-1];if(last&&last.n===n)last.d+=d;else segs.push({n,d})});
+  const keep=segs.filter(g=>g.n&&!isNum(g.n)&&!SKIP.test(g.n)&&(g.d>=1000||(g.d>=600&&MAJOR.test(g.n))));
+  const out=[];keep.forEach(g=>{const last=out[out.length-1];if(last&&last.n===g.n)last.d+=g.d;else out.push({...g})});
+  return out;
+}
+const allSteps=rt=>(rt.legs||[]).flatMap(l=>l.steps||[]);
+const sameRoute=(a,b)=>Math.abs(a.distance-b.distance)<150&&Math.abs(a.duration-b.duration)<30;
+function uniq(list){const out=[];list.forEach(r=>{if(!out.some(o=>sameRoute(o,r)))out.push(r)});return out}
+function decode6(str){let i=0,lat=0,lng=0,out=[];while(i<str.length){for(const k of [0,1]){let b,sh=0,r=0;do{b=str.charCodeAt(i++)-63;r|=(b&31)<<sh;sh+=5}while(b>=32);const d=(r&1)?~(r>>1):(r>>1);if(k===0)lat+=d;else lng+=d}out.push([lng/1e6,lat/1e6])}return out}
+async function throttle(){const w=1100-(Date.now()-lastReq);if(w>0)await sleep(w);lastReq=Date.now()}
+// 一般道ルート：Valhalla（高速・有料道路を避ける）。各区間の線も取り出して道路ごとに色分けに使う
+async function valhallaGeneral(p){
+  await throttle();
+  const q={locations:[{lat:+me.lat.toFixed(5),lon:+me.lng.toFixed(5)},{lat:p.lat,lon:p.lng}],costing:"auto",
+    costing_options:{auto:{use_highways:0,use_tolls:0}},alternates:2,language:"ja-JP",units:"kilometers",directions_type:"maneuvers"};
+  const r=await fetch(VALHALLA+encodeURIComponent(JSON.stringify(q)),{referrerPolicy:"no-referrer"});
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  const j=await r.json();
+  const trips=[j.trip,...((j.alternates||[]).map(a=>a.trip))].filter(Boolean);
+  return trips.map(t=>{const leg=t.legs[0];const coords=decode6(leg.shape);
+    const steps=leg.maneuvers.map(m=>({name:(m.street_names||[])[0]||"",ref:"",distance:(m.length||0)*1000,
+      coords:coords.slice(m.begin_shape_index,(m.end_shape_index||m.begin_shape_index)+1)}));
+    return {distance:t.summary.length*1000,duration:t.summary.time,geometry:{type:"LineString",coordinates:coords},legs:[{steps}]}});
+}
+// 予備：OSRM（区間の線つき）。高速を使うルートは除く
+async function osrmGeneral(p){
+  await throttle();
+  const url=ROUTE_API+me.lng.toFixed(5)+","+me.lat.toFixed(5)+";"+p.lng.toFixed(6)+","+p.lat.toFixed(6)+"?overview=full&geometries=geojson&steps=true&alternatives=3";
+  const r=await fetch(url,{referrerPolicy:"no-referrer"});if(!r.ok)throw new Error("HTTP "+r.status);
+  const j=await r.json();if(j.code!=="Ok")throw new Error(j.code);
+  return (j.routes||[]).filter(rt=>!allSteps(rt).some(st=>(st.intersections||[]).some(i=>i.classes&&i.classes.includes("motorway"))))
+    .map(rt=>{allSteps(rt).forEach(st=>{st.coords=st.geometry&&st.geometry.coordinates||[]});return rt});
+}
+async function getGeneral(p){
+  let gen=[];
+  try{gen=await valhallaGeneral(p)}catch(e){gen=[]}
+  if(!gen.length){try{gen=await osrmGeneral(p)}catch(e){}}
+  return uniq(gen).sort((x,y)=>x.distance-y.distance).slice(0,2)
+    .map((rt,k)=>({label:"ルート "+(k+1)+(k===0?"（最短）":""),rt}));
+}
+// 主な道路に色を割り当てる（ルート内で同じ道路は同じ色）
+function colorize(rt){
+  const roads=majorRoads(allSteps(rt));const map_={};
+  roads.forEach(g=>{if(!(g.n in map_))map_[g.n]=ROADCOL[Object.keys(map_).length%ROADCOL.length]});
+  return {roads,colorOf:n=>map_[n]||OTHERCOL};
+}
+function drawRoutes(res,on){
+  const src=map.getSource("route");if(!src)return;
+  const fs=[];
+  res.forEach((x,k)=>{
+    if(k!==on){fs.push({type:"Feature",properties:{on:0,col:"#9ca3af"},geometry:x.rt.geometry});return}
+    const {colorOf}=colorize(x.rt);
+    allSteps(x.rt).forEach(st=>{if(!st.coords||st.coords.length<2)return;
+      fs.push({type:"Feature",properties:{on:1,col:colorOf(roadLabel(st))},geometry:{type:"LineString",coordinates:st.coords}})});
+  });
+  src.setData({type:"FeatureCollection",features:fs});
+}
+function renderRoutes(res,box,on){
+  box.innerHTML="";
+  res.forEach((x,k)=>{
+    const rt=x.rt,{roads,colorOf}=colorize(rt);
+    const c=document.createElement("button");c.type="button";c.className="rc"+(k===on?" on":"");
+    const t=document.createElement("div");t.className="ttl";
+    t.textContent=x.label+"　約"+fmt(rt.distance/1000)+"・約"+fmtDur(rt.duration);
+    const rd=document.createElement("div");rd.className="rd";
+    if(!roads.length)rd.textContent="主な幹線道路は通りません（近距離）";
+    roads.forEach((g,j)=>{if(j)rd.append(" → ");const sp=document.createElement("span");sp.style.cssText="white-space:nowrap";
+      const dot=document.createElement("i");dot.style.cssText="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle;background:"+(k===on?colorOf(g.n):OTHERCOL);
+      sp.append(dot,g.n);rd.append(sp)});
+    c.append(t,rd);c.onclick=()=>{renderRoutes(res,box,k);drawRoutes(res,k)};box.append(c);
+  });
+  const note=document.createElement("div");note.className="note";
+  note.textContent="一般道のみ（高速・有料道路を除く）のルートです。時間は渋滞を含まない目安です。経路：Valhalla／OSRM（FOSSGIS）・地図データ © OpenStreetMap contributors。実際のナビの経路とは異なる場合があります。";
+  box.append(note);
+}
+function autoRoute(i,box){
+  clearTimeout(routeTimer);const token=++routeToken;
+  if(!me){box.innerHTML="";const m=document.createElement("div");m.className="note";m.textContent="現在地が取れると、通る道を自動で表示します。";box.append(m);return}
+  const m=document.createElement("div");m.className="note";m.textContent="通る道を計算しています…";box.innerHTML="";box.append(m);
+  const live=()=>token===routeToken&&cur===i;
+  routeTimer=setTimeout(async()=>{
+    const p=PTS[i];const key=i+"@"+me.lat.toFixed(3)+","+me.lng.toFixed(3);
+    const c=RCACHE.get(key);
+    if(c&&Date.now()-c.t<5*60*1000){renderRoutes(c.r,box,0);drawRoutes(c.r,0);return}
+    try{
+      const res=await getGeneral(p);if(!live())return;
+      if(!res.length){box.textContent="経路が見つかりませんでした。";return}
+      RCACHE.set(key,{t:Date.now(),r:res});renderRoutes(res,box,0);drawRoutes(res,0);
+    }catch(e){if(live())box.textContent="通る道を取得できませんでした（"+e.message+"）。";}
+  },800);
+}
+function clearRoute(){clearTimeout(routeTimer);routeToken++;const src=map.getSource("route");if(src)src.setData({type:"FeatureCollection",features:[]})}
+function appForm(back){
+  sheet.classList.remove("min");sheet.innerHTML="";
+  const h=document.createElement("div");h.className="sh";const t=document.createElement("h2");t.textContent="ナビアプリを追加";
+  const x=document.createElement("button");x.className="x";x.type="button";x.textContent="✕";x.setAttribute("aria-label","閉じる");x.onclick=()=>select(back);
+  h.append(t,x);
+  const help=document.createElement("div");help.className="meta";
+  help.textContent="アプリの連携用URLを登録します。{lat}＝緯度、{lng}＝経度、{name}＝施設名に置き換わります。例：yjcarnavi://navi/select?lat={lat}&lon={lng}&name={name}";
+  const f=document.createElement("form");f.style.cssText="display:flex;flex-direction:column;gap:8px";
+  const n=document.createElement("input");n.id="cName";n.placeholder="表示名（例：カーナビタイム）";n.maxLength=20;n.required=true;
+  const u=document.createElement("input");u.id="cTpl";u.placeholder="URLの形";u.maxLength=400;u.required=true;u.autocapitalize="off";u.spellcheck=false;
+  [n,u].forEach(el=>el.style.cssText="font:inherit;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:8px");
+  const ok=document.createElement("button");ok.type="submit";ok.className="go";ok.style.border="0";ok.textContent="登録する";
+  f.append(n,u,ok);
+  f.onsubmit=e=>{e.preventDefault();
+    if(!validTpl(u.value.trim())){toast("登録できない形式です。「アプリ名://…」の形で、{lat} {lng} {name} のどれかを含めてください。");return}
+    const list=S.get("tm_custom",[]);list.push({n:n.value.trim().slice(0,20),t:u.value.trim()});S.set("tm_custom",list);
+    loadCustom();toast("登録しました。");select(back)};
+  const list=document.createElement("div");list.className="near";
+  (S.get("tm_custom",[])||[]).forEach((c,k)=>{const b=document.createElement("button");b.type="button";
+    const l=document.createElement("span");l.textContent=c.n;const r=document.createElement("b");r.textContent="削除";
+    b.append(l,r);b.onclick=()=>{const L=S.get("tm_custom",[]);L.splice(k,1);S.set("tm_custom",L);loadCustom();if(!APPS[mainApp]){mainApp="google";S.set("tm_app",mainApp)}appForm(back)};list.append(b)});
+  sheet.append(h,help,f,list);sheet.hidden=false;
+}
+function closeSheet(){sheet.classList.remove("min");sheet.hidden=true;cur=-1;setSel(-1);clearRoute()}
+map.on("click",e=>{const ls=["fac","toilet"].filter(l=>map.getLayer(l));if(ls.length&&map.queryRenderedFeatures(e.point,{layers:ls}).length)return;closeSheet()});
+
+function showList(title,idx){
+  sheet.classList.remove("min");sheet.innerHTML="";
+  const h=document.createElement("div");h.className="sh";
+  const t=document.createElement("h2");t.textContent=title;
+  const x=document.createElement("button");x.className="x";x.type="button";x.textContent="✕";x.setAttribute("aria-label","閉じる");x.onclick=closeSheet;
+  h.append(t,x);sheet.append(h);
+  const list=document.createElement("div");list.className="near";
+  if(!idx.length){const m=document.createElement("div");m.className="meta";m.textContent=title.includes("★")?"施設を開いて「☆ お気に入り」を押すとここに並びます。":"表示できる施設がありません。";list.append(m)}
+  idx.forEach(i=>{const p=PTS[i];const b=document.createElement("button");b.type="button";
+    const l=document.createElement("span");l.textContent=CAT[p.c][0]+" "+p.n;
+    const r=document.createElement("b");r.textContent=me?fmt(km(me,p)):"";
+    b.append(l,r);b.onclick=()=>select(i,true);list.append(b)});
+  list.style.cssText="max-height:42vh;overflow:auto";
+  sheet.append(list);sheet.hidden=false;
+}
+
+document.getElementById("nearBtn").onclick=()=>{
+  if(!me){toast("現在地を取得しています。右上の現在地ボタンを押し、位置情報を許可してください。");geo.trigger();return}
+  const idx=PTS.map((p,i)=>i).filter(i=>!off.has(PTS[i].c)).sort((a,b)=>km(me,PTS[a])-km(me,PTS[b])).slice(0,15);
+  showList("現在地から近い施設",idx);
+};
+
+/* ---------- 検索 ---------- */
+const norm=s=>s.normalize("NFKC").toLowerCase().replace(/\s+/g,"");
+const q=document.getElementById("q"),res=document.getElementById("results");
+q.addEventListener("input",()=>{
+  const t=norm(q.value);res.innerHTML="";
+  if(!t){res.hidden=true;return}
+  const hit=PTS.map((p,i)=>i).filter(i=>norm(PTS[i].n+PTS[i].f+PTS[i].c+(PTS[i].a||"")).includes(t)).slice(0,20);
+  hit.forEach(i=>{const p=PTS[i];const b=document.createElement("button");b.type="button";
+    const e=document.createElement("span");e.textContent=CAT[p.c][0];
+    const s=document.createElement("span");s.append(p.n);const sm=document.createElement("small");sm.textContent=" "+p.c+(me?" · "+fmt(km(me,p)):"");s.append(sm);
+    b.append(e,s);b.onclick=()=>{res.hidden=true;q.blur();select(i,true)};res.append(b)});
+  if(!hit.length){const b=document.createElement("button");b.type="button";b.textContent="「"+q.value+"」をGoogleマップでナビ";
+    b.onclick=()=>window.open("https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination="+encodeURIComponent(q.value),"_blank","noopener");res.append(b)}
+  res.hidden=false;
+});
+</script>
+</body>
+</html>
