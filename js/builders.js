@@ -76,12 +76,23 @@ function ringify(ways){
 function ringArea(r){let a=0;for(let i=0;i<r.length-1;i++)a+=r[i][0]*r[i+1][1]-r[i+1][0]*r[i][1];return Math.abs(a/2)}
 function centroid(r){let x=0,y=0,a=0;for(let i=0;i<r.length-1;i++){const f=r[i][0]*r[i+1][1]-r[i+1][0]*r[i][1];x+=(r[i][0]+r[i+1][0])*f;y+=(r[i][1]+r[i+1][1])*f;a+=f}
   if(!a)return r[0];return [x/(3*a),y/(3*a)]}
+/* 線を間引く（ダグラス・ポイカー法。tol は度。0.00006度≒6m） */
+function simplifyRing(r,tol){
+  if(r.length<8)return r;
+  const keep=new Uint8Array(r.length);keep[0]=keep[r.length-1]=1;const st=[[0,r.length-1]];
+  while(st.length){const [a,b]=st.pop();let md=0,mi=-1;const [x1,y1]=r[a],[x2,y2]=r[b];const dx=x2-x1,dy=y2-y1,L=dx*dx+dy*dy;
+    for(let i=a+1;i<b;i++){const [x,y]=r[i];let d;
+      if(L===0)d=(x-x1)**2+(y-y1)**2;else{let t=((x-x1)*dx+(y-y1)*dy)/L;t=Math.max(0,Math.min(1,t));d=(x-x1-t*dx)**2+(y-y1-t*dy)**2}
+      if(d>md){md=d;mi=i}}
+    if(mi>=0&&md>tol*tol){keep[mi]=1;st.push([a,mi],[mi,b])}}
+  return r.filter((_,i)=>keep[i]);
+}
 function buildAreas(els){
   const out=[];
   els.forEach(e=>{
     if(e.type!=="relation")return;const n=(e.tags&&(e.tags["name:ja"]||e.tags.name))||"";const def=AREA_LIST.find(a=>a[0]===n);if(!def)return;
     const ways=(e.members||[]).filter(m=>m.type==="way"&&m.role!=="inner"&&Array.isArray(m.geometry)).map(m=>m.geometry.filter(p=>isFinite(p.lat)&&isFinite(p.lon)));
-    const rings=ringify(ways).map(r=>r.map(p=>[+p[0].toFixed(5),+p[1].toFixed(5)]));if(!rings.length)return;
+    const rings=ringify(ways).map(r=>simplifyRing(r,0.00006).map(p=>[+p[0].toFixed(5),+p[1].toFixed(5)])).filter(r=>r.length>=4);if(!rings.length)return;
     const big=rings.slice().sort((a,b)=>ringArea(b)-ringArea(a))[0];
     out.push({n,col:def[1]||ZONE_COL,main:def[1]?1:0,rings,c:centroid(big).map(v=>+v.toFixed(5))});
   });
@@ -134,7 +145,7 @@ nwr(area.a)[leisure=stadium][name];
 );out center tags;`,
   toilets:`[out:json][timeout:120];(node[amenity=toilets](${TOILET_BB.join(",")});way[amenity=toilets](${TOILET_BB.join(",")}););out center tags;`,
 };
-if(typeof module!=="undefined")module.exports={km,buildICs,buildRail,buildAreas,buildSai,cleanToilet,saiCat,AREA_LIST,SAI_CITIES,QUERIES,TOILET_BB};
+if(typeof module!=="undefined")module.exports={simplifyRing,km,buildICs,buildRail,buildAreas,buildSai,cleanToilet,saiCat,AREA_LIST,SAI_CITIES,QUERIES,TOILET_BB};
 
 /* LPGスタンド・充電スポット・タクシー乗り場：表示用の形にする（kind: "fuel" または "taxi"） */
 function buildPoi(els,kind){
