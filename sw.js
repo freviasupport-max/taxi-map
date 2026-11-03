@@ -3,7 +3,7 @@
    ・地図ライブラリ：保存優先（バージョン固定のため）
    ・地図データ（OpenFreeMap）：保存優先、なければ取得して保存
    ・経路計算・Overpassなどは保存しない */
-const SHELL="tm-shell-v2",LIB="tm-lib-v1",TILES="tm-tiles-v1";
+const SHELL="tm-shell-v3",LIB="tm-lib-v1",TILES="tm-tiles-v1";
 const KEEP=[SHELL,LIB,TILES];
 self.addEventListener("install",e=>{
   e.waitUntil(caches.open(SHELL).then(c=>c.addAll(["./","./index.html","./js/builders.js"])).catch(()=>{}));
@@ -38,7 +38,8 @@ self.addEventListener("fetch",e=>{
   const req=e.request;if(req.method!=="GET")return;
   const u=new URL(req.url);
   if(u.origin===self.location.origin){
-    if(/\/(gaiku|data|js|lib)\//.test(u.pathname)||u.pathname.endsWith("gaiku.json")||u.pathname.endsWith("manifest.webmanifest")||/\/icons\//.test(u.pathname)){e.respondWith(caches.open(SHELL).then(c=>c.match(req,{ignoreSearch:true}).then(hit=>{
+    if(/\/(js|lib)\//.test(u.pathname)){e.respondWith(networkFirst(req,SHELL,3500));return}
+    if(/\/(gaiku|data)\//.test(u.pathname)||u.pathname.endsWith("gaiku.json")||u.pathname.endsWith("manifest.webmanifest")||/\/icons\//.test(u.pathname)){e.respondWith(caches.open(SHELL).then(c=>c.match(req,{ignoreSearch:true}).then(hit=>{
       const net=fetch(req).then(res=>{if(res&&res.ok)c.put(req,res.clone()).catch(()=>{});return res});
       if(hit){e.waitUntil(net.catch(()=>{}));return hit}return net})));return}
     if(req.mode==="navigate"||/\/(index\.html|events\.json)?$/.test(u.pathname)||u.pathname.endsWith("events.json"))
