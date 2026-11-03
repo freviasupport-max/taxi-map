@@ -1,0 +1,45 @@
+# 地図データの更新（月1回、または手動）
+# ・OpenStreetMap から IC・路線と駅・エリア境界・埼玉西部の施設・トイレを取得して data/ に保存
+# ・地図ライブラリ（MapLibre GL JS 4.7.1）を npm から取得して lib/ に保存
+# このリポジトリにだけ書き込みます。外部からの Pull Request では動きません。
+name: 地図データの更新
+on:
+  schedule:
+    - cron: "17 18 1 * *"   # 毎月1日 3:17（日本時間）
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: build-data
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: データを作る
+        run: node scripts/build-data.mjs
+      - name: 地図ライブラリを同梱する
+        run: |
+          set -e
+          mkdir -p lib
+          tmp="$(mktemp -d)"
+          (cd "$tmp" && npm pack maplibre-gl@4.7.1 --silent && tar xzf maplibre-gl-4.7.1.tgz)
+          cp "$tmp/package/dist/maplibre-gl.js" "$tmp/package/dist/maplibre-gl.css" lib/
+          cp "$tmp"/package/LICENSE* lib/ 2>/dev/null || true
+          rm -rf "$tmp"
+      - name: 変更を保存する
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data lib
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "地図データを更新"
+            git push
+          fi
