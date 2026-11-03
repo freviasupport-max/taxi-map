@@ -1,0 +1,17 @@
+{
+  "name": "タクシー施設マップ",
+  "short_name": "施設マップ",
+  "description": "都内の主要施設へすぐナビを開始できるタクシー用の地図",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1d1c19",
+  "theme_color": "#1d1c19",
+  "icons": [
+    {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
