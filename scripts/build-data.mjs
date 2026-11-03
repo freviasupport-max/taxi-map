@@ -33,6 +33,8 @@ const jobs=[
   ["rail", async()=>{const d=B.buildRail(await overpass(B.QUERIES.rail));return d.stations.length>200?d:null}],
   ["areas",async()=>{const d=B.buildAreas(await overpass(B.QUERIES.areas()));return d.length===B.AREA_LIST.length?{d}:null}],
   ["sai",  async()=>{const d=B.buildSai(await overpass(B.QUERIES.sai()));return d.length>20?{d}:null}],
+  ["fuel", async()=>{const d=B.buildPoi(await overpass(B.QUERIES.fuel),"fuel");return d.length>20?{d}:null}],
+  ["taxi", async()=>{const d=B.buildPoi(await overpass(B.QUERIES.taxi),"taxi");return d.length>20?{d}:null}],
   ["toilets",async()=>{const d=(await overpass(B.QUERIES.toilets)).map(B.cleanToilet).filter(Boolean);return d.length>100?{bb:B.TOILET_BB,d}:null}],
 ];
 for(const [name,fn] of jobs){

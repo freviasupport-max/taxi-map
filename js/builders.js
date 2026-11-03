@@ -128,3 +128,24 @@ nwr(area.a)[leisure=stadium][name];
   toilets:`[out:json][timeout:120];(node[amenity=toilets](${TOILET_BB.join(",")});way[amenity=toilets](${TOILET_BB.join(",")}););out center tags;`,
 };
 if(typeof module!=="undefined")module.exports={km,buildICs,buildRail,buildAreas,buildSai,cleanToilet,saiCat,AREA_LIST,SAI_CITIES,QUERIES,TOILET_BB};
+
+/* LPGスタンド・充電スポット・タクシー乗り場：表示用の形にする（kind: "fuel" または "taxi"） */
+function buildPoi(els,kind){
+  const out=[];
+  (els||[]).forEach(e=>{
+    const t=e.tags||{};const lat=e.lat!=null?e.lat:(e.center&&e.center.lat),lng=e.lon!=null?e.lon:(e.center&&e.center.lon);if(lat==null)return;
+    if(t.access&&/^(private|no|customers)$/.test(t.access)&&kind==="taxi")return;
+    let k,n;
+    if(kind==="taxi"){k="taxi";n=t["name:ja"]||t.name||"タクシー乗り場"}
+    else if(t.amenity==="charging_station"){k="ev";n=t["name:ja"]||t.name||t.operator||t.brand||"充電スポット"}
+    else{k="lpg";n=t["name:ja"]||t.name||t.brand||"LPGスタンド"}
+    n=String(n).replace(/[\u0000-\u001f]/g,"").trim().slice(0,40);
+    const o={k,n,lat:+(+lat).toFixed(6),lng:+(+lng).toFixed(6),h:String(t.opening_hours||"").slice(0,60)};
+    if(out.some(x=>x.k===o.k&&x.n===o.n&&km(x,o)<0.03))return;
+    out.push(o);
+  });
+  return out;
+}
+QUERIES.fuel=`[out:json][timeout:180];(nwr[amenity=fuel]["fuel:lpg"="yes"](${TOILET_BB.join(",")});nwr[amenity=fuel][name~"LPG|ＬＰＧ|オートガス"](${TOILET_BB.join(",")});nwr[amenity=charging_station](${TOILET_BB.join(",")}););out center tags;`;
+QUERIES.taxi=`[out:json][timeout:120];nwr[amenity=taxi](${TOILET_BB.join(",")});out center tags;`;
+if(typeof module!=="undefined")module.exports.buildPoi=buildPoi;
