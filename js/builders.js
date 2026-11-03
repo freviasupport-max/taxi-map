@@ -35,15 +35,22 @@ function buildRail(els){
   els.forEach(e=>{
     if(e.type!=="relation")return;const t=e.tags||{};const nm=t["name:ja"]||t.name;if(!nm)return;
     const base=lineBase(nm);if(!base)return;
-    let li=lineIdx.get(base);if(li==null){li=lines.length;lines.push({n:base,c:okColor(t.colour)});lineIdx.set(base,li)}
+    let li=lineIdx.get(base);if(li==null){li=lines.length;lines.push({n:base,c:okColor(t.colour),s:[]});lineIdx.set(base,li)}
     else if(!lines[li].c&&okColor(t.colour))lines[li].c=okColor(t.colour);
+    const seq=[]; // この運行系統の駅の並び（停車順）
     (e.members||[]).forEach(m=>{
       if(m.type!=="node"||!/^stop/.test(m.role||""))return;const nd=nodes.get(m.ref);if(!nd)return;
       const sn=((nd.tags&&(nd.tags["name:ja"]||nd.tags.name))||"").replace(/駅$/,"").trim();if(!sn)return;
-      let st=stations.find(x=>x.n===sn&&km(x,{lat:nd.lat,lng:nd.lon})<0.6);
-      if(!st){st={n:sn.slice(0,30),lat:+nd.lat.toFixed(6),lng:+nd.lon.toFixed(6),l:[]};stations.push(st)}
-      if(!st.l.includes(li))st.l.push(li);
+      let si=stations.findIndex(x=>x.n===sn&&km(x,{lat:nd.lat,lng:nd.lon})<0.6);
+      if(si<0){si=stations.length;stations.push({n:sn.slice(0,30),lat:+nd.lat.toFixed(6),lng:+nd.lon.toFixed(6),l:[]})}
+      if(!stations[si].l.includes(li))stations[si].l.push(li);
+      if(seq[seq.length-1]!==si)seq.push(si);
     });
+    // 同じ路線で、既にある並び（逆向きも含む）に含まれる並びは足さない。路線ごとに最大6本
+    if(seq.length>=2){const L=lines[li].s;const key=seq.join(","),rkey=seq.slice().reverse().join(",");
+      if(!L.some(x=>{const k=x.join(",");return k.includes(key)||k.includes(rkey)})){
+        for(let i=L.length-1;i>=0;i--){const k=L[i].join(",");if(key.includes(k)||rkey.includes(k))L.splice(i,1)}
+        if(L.length<6)L.push(seq)}}
   });
   // 駅のない路線は除く
   const used=new Set(stations.flatMap(s=>s.l));
