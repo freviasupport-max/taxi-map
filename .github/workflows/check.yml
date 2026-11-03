@@ -1,0 +1,18 @@
+# ページの自動チェック（ファイルを更新するたびに実行。読み取りだけで、何も書き換えません）
+name: ページの自動チェック
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: チェックする
+        run: node scripts/check.mjs
