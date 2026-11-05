@@ -199,3 +199,24 @@ nwr[tourism~"^(theme_park|zoo|aquarium)$"][name](${TOILET_BB.join(",")});
 nwr[name~"競馬場|競艇場|ボートレース|競輪場|オートレース場"](${TOILET_BB.join(",")});
 );out center tags;`;
 if(typeof module!=="undefined")module.exports.buildSpots=buildSpots;
+// ---- 会社（OpenStreetMap の office=*）。wikidata が付いたもの（有名企業・本社など）を「大企業」として地図に出す ----
+const CORP_BB=[35.52,139.53,35.82,139.93]; // 23区＋武蔵野・三鷹
+const CORP_SKIP=/^(political_party|religion|government|diplomatic|vacant|yes)$/;
+function corpAddr(t){return [t["addr:province"],t["addr:city"],t["addr:quarter"],t["addr:neighbourhood"],t["addr:block_number"],t["addr:housenumber"]].filter(Boolean).join("").replace(/[\u0000-\u001f]/g,"").slice(0,60)}
+function buildCorp(els){
+  const out=[];
+  (els||[]).forEach(e=>{
+    const t=e.tags||{};if(CORP_SKIP.test(t.office||""))return;
+    const n=String(t["name:ja"]||t.name||"").replace(/[\u0000-\u001f]/g,"").trim().slice(0,50);if(!n)return;
+    const lat=e.lat!=null?e.lat:(e.center&&e.center.lat),lng=e.lon!=null?e.lon:(e.center&&e.center.lon);if(lat==null)return;
+    const o={n,lat:+(+lat).toFixed(6),lng:+(+lng).toFixed(6)};
+    if(t.wikidata||t["brand:wikidata"]||t["operator:wikidata"])o.b=1;
+    const a=corpAddr(t);if(a)o.a=a;
+    const same=out.find(x=>x.n===o.n&&km(x,o)<0.1);if(same){if(o.b)same.b=1;return}
+    out.push(o);
+  });
+  return out;
+}
+QUERIES.corp=`[out:json][timeout:180];(nwr[office][name](${CORP_BB.join(",")}););out center tags;`;
+QUERIES.corpBig=`[out:json][timeout:60];(nwr[office][name][wikidata](${CORP_BB.join(",")}););out center tags;`;
+if(typeof module!=="undefined")Object.assign(module.exports,{buildCorp,CORP_BB});
