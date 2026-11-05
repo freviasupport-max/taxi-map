@@ -167,3 +167,35 @@ function buildPoi(els,kind){
 QUERIES.fuel=`[out:json][timeout:180];(nwr[amenity=fuel]["fuel:lpg"="yes"](${TOILET_BB.join(",")});nwr[amenity=fuel][name~"LPG|ＬＰＧ|オートガス"](${TOILET_BB.join(",")});nwr[amenity=charging_station](${TOILET_BB.join(",")}););out center tags;`;
 QUERIES.taxi=`[out:json][timeout:120];nwr[amenity=taxi](${TOILET_BB.join(",")});out center tags;`;
 if(typeof module!=="undefined")module.exports.buildPoi=buildPoi;
+
+/* 人が集まる場所（商業施設・映画館・劇場・斎場・病院・大学・公営競技場・テーマパークなど） */
+const SPOT_RULES=[
+  ["競馬・競艇",t=>/競馬場|競艇|ボートレース|競輪場|オートレース/.test(t.name||"")],
+  ["斎場・葬儀場",t=>t.amenity==="funeral_hall"||t.amenity==="crematorium"||/斎場|葬祭|葬儀|セレモニー/.test(t.name||"")],
+  ["商業施設",t=>t.shop==="mall"||t.shop==="department_store"],
+  ["映画館",t=>t.amenity==="cinema"],
+  ["劇場・ホール",t=>t.amenity==="theatre"||t.amenity==="arts_centre"||t.amenity==="events_venue"],
+  ["スポーツ",t=>t.leisure==="stadium"],
+  ["観光",t=>/^(theme_park|zoo|aquarium)$/.test(t.tourism||"")],
+  ["病院",t=>t.amenity==="hospital"],
+  ["大学",t=>t.amenity==="university"],
+];
+function buildSpots(els){
+  const out=[];
+  (els||[]).forEach(e=>{
+    const t=e.tags||{};const n=String(t["name:ja"]||t.name||"").replace(/[\u0000-\u001f]/g,"").trim().slice(0,40);if(!n)return;
+    const lat=e.lat!=null?e.lat:(e.center&&e.center.lat),lng=e.lon!=null?e.lon:(e.center&&e.center.lon);if(lat==null)return;
+    const r=SPOT_RULES.find(x=>x[1]({...t,name:n}));if(!r)return;
+    const o={n,c:r[0],lat:+(+lat).toFixed(6),lng:+(+lng).toFixed(6)};
+    if(out.some(x=>x.n===o.n&&km(x,o)<0.3))return;out.push(o);
+  });
+  return out;
+}
+QUERIES.spots=`[out:json][timeout:180];(
+nwr[shop~"^(mall|department_store)$"][name](${TOILET_BB.join(",")});
+nwr[amenity~"^(cinema|theatre|arts_centre|events_venue|funeral_hall|crematorium|hospital|university)$"][name](${TOILET_BB.join(",")});
+nwr[leisure=stadium][name](${TOILET_BB.join(",")});
+nwr[tourism~"^(theme_park|zoo|aquarium)$"][name](${TOILET_BB.join(",")});
+nwr[name~"競馬場|競艇場|ボートレース|競輪場|オートレース場"](${TOILET_BB.join(",")});
+);out center tags;`;
+if(typeof module!=="undefined")module.exports.buildSpots=buildSpots;
