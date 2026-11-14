@@ -221,26 +221,42 @@ function buildCorp(els){
 QUERIES.corp=`[out:json][timeout:180];(nwr[office][name](${CORP_BB.join(",")}););out center tags;`;
 QUERIES.corpBig=`[out:json][timeout:60];(nwr[office][name][wikidata](${CORP_BB.join(",")}););out center tags;`;
 if(typeof module!=="undefined")Object.assign(module.exports,{buildCorp,CORP_BB});
-// ---- 交差点の名前（信号・交差点に付いた name）。交わる道路の種類で大きさを3段階に分ける ----
+// ---- 交差点（信号・交差点の名前と、交わる道路） ----
 // r=3：国道・主要道（trunk/primary）どうしが交わる大きな交差点、r=2：主要道に別の道路（secondary/tertiary）が交わる、r=1：その他
+// w：交わる道路の名前（主要な順・最大4）。名前のない信号は、名前のある道路が2本以上交わるときだけ「〇〇×△△」として残す（u=1）
 const XING_BB=[35.50,139.30,36.02,139.95];
-const xingQuery=(bb,to)=>`[out:json][timeout:${to||60}];(node[highway=traffic_signals][name](${bb.join(",")});node[junction=yes][name](${bb.join(",")});node[highway=crossing][crossing=traffic_signals][name](${bb.join(",")}););out qt;way(bn)[highway~"^(trunk|primary|secondary|tertiary)$"];out body qt;`;
+const xingQuery=(bb,to)=>`[out:json][timeout:${to||60}];(node[highway=traffic_signals](${bb.join(",")});node[junction=yes][name](${bb.join(",")}););out qt;way(bn)[highway~"^(trunk|primary|secondary|tertiary|unclassified|residential)$"];out body qt;`;
+const XCLS={trunk:4,primary:4,secondary:3,tertiary:2,unclassified:1,residential:1};
 function buildXing(els){
   const nodes=[],par=new Map();
   (els||[]).forEach(e=>{
     if(e.type==="node"){const t=e.tags||{};const n=String(t["name:ja"]||t.name||"").replace(/[\u0000-\u001f]/g,"").trim().slice(0,30);
-      if(n&&isFinite(e.lat)&&isFinite(e.lon))nodes.push({id:e.id,n,lat:e.lat,lng:e.lon})}
-    else if(e.type==="way"&&Array.isArray(e.nodes)){const t=e.tags||{};const w={c:t.highway,k:t.name||t.ref||("w"+e.id)};
+      if(isFinite(e.lat)&&isFinite(e.lon))nodes.push({id:e.id,n,lat:e.lat,lng:e.lon})}
+    else if(e.type==="way"&&Array.isArray(e.nodes)){const t=e.tags||{};
+      const nm=String(t["name:ja"]||t.name||"").replace(/[\u0000-\u001f]/g,"").trim().slice(0,20);
+      const w={c:t.highway,k:nm||t.ref||("w"+e.id),nm:nm||(t.ref?"国道"+String(t.ref).slice(0,5)+"号":""),cl:XCLS[t.highway]||0};
       e.nodes.forEach(id=>{let a=par.get(id);if(!a)par.set(id,a=[]);a.push(w)})}
   });
-  // 上下線が分かれた道路などで同じ名前の点が並ぶので、150m以内の同名はまとめてから大きさを決める
-  const out=[];
-  nodes.forEach(o=>{const same=out.find(x=>x.n===o.n&&km(x,o)<0.15);if(same){same._s.push(o);return}out.push({n:o.n,lat:o.lat,lng:o.lng,_s:[o]})});
+  const roadsOf=ids=>{const m=new Map();ids.forEach(id=>(par.get(id)||[]).forEach(w=>{const k=w.nm||w.k;const o=m.get(k);if(!o||o.cl<w.cl)m.set(k,w)}));
+    return [...m.values()].sort((a,b)=>b.cl-a.cl)};
   const rank=ids=>{const main=new Set(),sub=new Set();
     ids.forEach(id=>(par.get(id)||[]).forEach(w=>{(w.c==="trunk"||w.c==="primary"?main:sub).add(w.k)}));
     sub.forEach(k=>{if(main.has(k))sub.delete(k)});
     if(main.size>=2)return 3;if(main.size>=1&&sub.size>=1)return 2;if(sub.size>=2)return 2;return 1};
-  return out.map(x=>({n:x.n,lat:+(x._s.reduce((s,o)=>s+o.lat,0)/x._s.length).toFixed(6),lng:+(x._s.reduce((s,o)=>s+o.lng,0)/x._s.length).toFixed(6),r:rank(x._s.map(o=>o.id))}));
+  // 名前のある点：150m以内の同名はまとめる
+  const named=[],un=[];
+  nodes.forEach(o=>{if(o.n){const same=named.find(x=>x.n===o.n&&km(x,o)<0.15);if(same){same._s.push(o);return}named.push({n:o.n,lat:o.lat,lng:o.lng,_s:[o]})}
+    else un.push(o)});
+  // 名前のない信号：名前のある道路が2本以上で、そのうち1本は都道クラス以上のときだけ。同じ道路の組み合わせで80m以内はまとめる
+  const unc=[];
+  un.forEach(o=>{const rs=roadsOf([o.id]).filter(w=>w.nm);if(rs.length<2||rs[0].cl<3)return;
+    if(named.some(x=>km(x,o)<0.08))return;
+    const key=rs.slice(0,2).map(w=>w.nm).sort().join("×");
+    const same=unc.find(x=>x.key===key&&km(x,o)<0.08);if(same){same._s.push(o);return}
+    unc.push({key,n:"",lat:o.lat,lng:o.lng,_s:[o]})});
+  const avg=(x,k)=>+(x._s.reduce((s,o)=>s+o[k],0)/x._s.length).toFixed(6);
+  return named.concat(unc).map(x=>{const ids=x._s.map(o=>o.id);const rs=roadsOf(ids).filter(w=>w.nm).slice(0,4).map(w=>w.nm);
+    const o={n:x.n||rs.slice(0,2).join("×"),lat:avg(x,"lat"),lng:avg(x,"lng"),r:rank(ids)};if(rs.length)o.w=rs;if(!x.n)o.u=1;return o});
 }
 if(typeof module!=="undefined")Object.assign(module.exports,{buildXing,xingQuery,XING_BB});
 // ---- 高速の出入口（ランプのつながりから正確な位置を割り出す） ----
