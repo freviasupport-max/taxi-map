@@ -59,7 +59,8 @@ function buildRail(els){
 }
 const ZONE_COL="#64748b";
 const AREA_LIST=[["千代田区","#e11d48"],["中央区","#ea580c"],["港区","#2563eb"],["新宿区","#16a34a"],["渋谷区","#9333ea"],["練馬区","#0891b2"],["杉並区","#ca8a04"],["武蔵野市","#db2777"],
-  ...["文京区","台東区","墨田区","江東区","品川区","目黒区","大田区","世田谷区","中野区","豊島区","北区","荒川区","板橋区","足立区","葛飾区","江戸川区","三鷹市"].map(n=>[n,null])];
+  ["文京区","#65a30d"],["台東区","#c2410c"],["墨田区","#0d9488"],["江東区","#4f46e5"],["品川区","#be123c"],["目黒区","#7c3aed"],["大田区","#0369a1"],["世田谷区","#15803d"],
+  ["中野区","#b45309"],["豊島区","#a21caf"],["北区","#0e7490"],["荒川区","#9f1239"],["板橋区","#4d7c0f"],["足立区","#1d4ed8"],["葛飾区","#c026d3"],["江戸川区","#0f766e"],["三鷹市","#f97316"]];
 function ringify(ways){
   const segs=ways.map(w=>w.map(p=>[p.lon,p.lat])).filter(w=>w.length>1);const rings=[];
   const same=(a,b)=>Math.abs(a[0]-b[0])<1e-7&&Math.abs(a[1]-b[1])<1e-7;
@@ -242,3 +243,56 @@ function buildXing(els){
   return out.map(x=>({n:x.n,lat:+(x._s.reduce((s,o)=>s+o.lat,0)/x._s.length).toFixed(6),lng:+(x._s.reduce((s,o)=>s+o.lng,0)/x._s.length).toFixed(6),r:rank(x._s.map(o=>o.id))}));
 }
 if(typeof module!=="undefined")Object.assign(module.exports,{buildXing,xingQuery,XING_BB});
+// ---- 高速の出入口（ランプのつながりから正確な位置を割り出す） ----
+// 入口＝一般道からランプ（motorway_link）が始まる地点、出口＝ランプが一般道に降りきる地点。
+// ランプをたどって、どの高速（名前・路線番号）につながるか、行き先（destination）も拾う。
+const RAMP_BB=[35.40,139.35,35.95,140.05];
+const rampQuery=bb=>`[out:json][timeout:170];(way[highway~"^motorway(_link)?$"](${bb.join(",")});node[barrier=toll_booth][name](${bb.join(",")});node[highway=motorway_junction][name](${bb.join(",")}););out body geom qt;`;
+const cleanNm=v=>String(v||"").replace(/[\u0000-\u001f]/g,"").trim();
+const rampBase=n=>cleanNm(n).replace(/\s*[\(（].*?[\)）]\s*/g,"").replace(/(上り|下り|内回り|外回り)?(入口|出口)(料金所)?$|料金所$|(IC|インターチェンジ)$/,"").trim();
+const shortRoad=t=>{const n=cleanNm(t["name:ja"]||t.name);const ref=cleanNm(t.ref);
+  if(n)return n.replace(/^首都高速道路?/,"首都高").replace(/^首都高速/,"首都高").slice(0,24);return ref?ref.slice(0,10):""};
+function buildRamps(els){
+  const ways=new Map(),named=[];
+  (els||[]).forEach(e=>{
+    if(e.type==="way"&&Array.isArray(e.nodes)&&Array.isArray(e.geometry)&&e.nodes.length===e.geometry.length)ways.set(e.id,e);
+    else if(e.type==="node"&&isFinite(e.lat)&&isFinite(e.lon)){const t=e.tags||{};const n=rampBase(t["name:ja"]||t.name);
+      if(n&&!/JCT|ジャンクション|本線|PA$|SA$|パーキング|バス/.test(cleanNm(t.name)))named.push({n,lat:e.lat,lng:e.lon,toll:t.barrier==="toll_booth"})}
+  });
+  const pos=new Map(),MW=new Map(),starts=new Map(),ends=new Map(),links=[];
+  ways.forEach(w=>{const t=w.tags||{};w.nodes.forEach((id,i)=>pos.set(id,{lat:w.geometry[i].lat,lng:w.geometry[i].lon}));
+    if(t.highway==="motorway"){w.nodes.forEach(id=>{if(!MW.has(id))MW.set(id,t)});return}
+    let ns=w.nodes.slice();if(t.oneway==="-1")ns.reverse();
+    const L={ns,t};links.push(L);
+    (starts.get(ns[0])||starts.set(ns[0],[]).get(ns[0])).push(L);
+    (ends.get(ns[ns.length-1])||ends.set(ns[ns.length-1],[]).get(ns[ns.length-1])).push(L)});
+  // ランプを一方向にたどって、名前・行き先・つながる高速を集める
+  function walk(first,fwd){
+    const seen=new Set(),q=first.slice(),info={names:[],dest:new Set(),roads:new Set()};let steps=0;
+    while(q.length&&steps++<60){const L=q.shift();if(seen.has(L))continue;seen.add(L);
+      const t=L.t;const nm=rampBase(t["name:ja"]||t.name);if(nm)info.names.push(nm);
+      cleanNm(t.destination).split(";").forEach(d=>{d=d.trim();if(d&&info.dest.size<3)info.dest.add(d.slice(0,12))});
+      const nx=fwd?L.ns[L.ns.length-1]:L.ns[0];
+      if(MW.has(nx)){const r=shortRoad(MW.get(nx));if(r)info.roads.add(r);continue}
+      (fwd?starts:ends).get(nx)?.forEach(x=>q.push(x));
+      L.ns.forEach(id=>{if(MW.has(id)){const r=shortRoad(MW.get(id));if(r)info.roads.add(r)}});
+    }
+    return info;
+  }
+  const out=[];
+  const add=(id,kind,info)=>{
+    if(!info.roads.size)return;               // 高速につながらないランプは除く
+    const p=pos.get(id);if(!p)return;
+    let n=info.names.find(x=>x)||"";
+    if(!n){let best=null,bd=1.2;named.forEach(c=>{const d=km(p,c);if(d<bd){bd=d;best=c}});if(best)n=best.n}
+    if(!n)return;
+    const o={n:n.slice(0,24),kind,lat:+p.lat.toFixed(6),lng:+p.lng.toFixed(6)};
+    const r=[...info.roads][0];if(r)o.r=r;
+    if(info.dest.size)o.d=[...info.dest].join("・");
+    if(out.some(x=>x.n===o.n&&x.kind===o.kind&&km(x,o)<0.06))return;
+    out.push(o)};
+  starts.forEach((arr,id)=>{if(MW.has(id)||ends.has(id))return;add(id,"in",walk(arr,true))});
+  ends.forEach((arr,id)=>{if(MW.has(id)||starts.has(id))return;add(id,"out",walk(arr,false))});
+  return out;
+}
+if(typeof module!=="undefined")Object.assign(module.exports,{buildRamps,rampQuery,RAMP_BB});

@@ -29,7 +29,12 @@ mkdirSync("data",{recursive:true});
 const save=(name,obj)=>{writeFileSync("data/"+name+".json",JSON.stringify(obj));console.log("  保存: data/"+name+".json");};
 const counts={};let ok=0;
 const jobs=[
-  ["ics",  async()=>{const d=B.buildICs(await overpass(B.QUERIES.ics));return d.length>20?{d}:null}],
+  ["ics",  async()=>{ // ランプのつながりから正確な出入口を作る（範囲が広いので4つに分けて取得してからまとめる）
+    const [S,W,N,E]=B.RAMP_BB,my=(S+N)/2,mx=(W+E)/2;const m=new Map();
+    for(const bb of [[S,W,my,mx],[S,mx,my,E],[my,W,N,mx],[my,mx,N,E]]){(await overpass(B.rampQuery(bb))).forEach(e=>m.set(e.type+e.id,e));await sleep(10000)}
+    const d=B.buildRamps([...m.values()]);if(d.length>80)return {v:2,d};
+    console.warn("  ランプからの作成が少ないため、従来の方法で作ります");
+    const d1=B.buildICs(await overpass(B.QUERIES.ics));return d1.length>20?{d:d1}:null}],
   ["rail", async()=>{const d=B.buildRail(await overpass(B.QUERIES.rail));return d.stations.length>200?d:null}],
   ["areas",async()=>{const d=B.buildAreas(await overpass(B.QUERIES.areas()));return d.length===B.AREA_LIST.length?{d}:null}],
   ["sai",  async()=>{const d=B.buildSai(await overpass(B.QUERIES.sai()));return d.length>20?{d}:null}],
