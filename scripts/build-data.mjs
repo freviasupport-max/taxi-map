@@ -37,6 +37,10 @@ const jobs=[
   ["taxi", async()=>{const d=B.buildPoi(await overpass(B.QUERIES.taxi),"taxi");return d.length>20?{d}:null}],
   ["spots",async()=>{const d=B.buildSpots(await overpass(B.QUERIES.spots));return d.length>100?{d}:null}],
   ["corp", async()=>{const d=B.buildCorp(await overpass(B.QUERIES.corp));return d.length>200?{d}:null}],
+  ["xing", async()=>{ // 範囲が広いので4つに分けて取得し、最後にまとめて整える
+    const [S,W,N,E]=B.XING_BB,my=(S+N)/2,mx=(W+E)/2;let els=[];
+    for(const bb of [[S,W,my,mx],[S,mx,my,E],[my,W,N,mx],[my,mx,N,E]]){els=els.concat(await overpass(B.xingQuery(bb,170)));await sleep(10000)}
+    const d=B.buildXing(els);return d.length>1000?{d}:null}],
   ["toilets",async()=>{const d=(await overpass(B.QUERIES.toilets)).map(B.cleanToilet).filter(Boolean);return d.length>100?{bb:B.TOILET_BB,d}:null}],
 ];
 for(const [name,fn] of jobs){

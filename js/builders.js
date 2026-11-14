@@ -220,3 +220,25 @@ function buildCorp(els){
 QUERIES.corp=`[out:json][timeout:180];(nwr[office][name](${CORP_BB.join(",")}););out center tags;`;
 QUERIES.corpBig=`[out:json][timeout:60];(nwr[office][name][wikidata](${CORP_BB.join(",")}););out center tags;`;
 if(typeof module!=="undefined")Object.assign(module.exports,{buildCorp,CORP_BB});
+// ---- 交差点の名前（信号・交差点に付いた name）。交わる道路の種類で大きさを3段階に分ける ----
+// r=3：国道・主要道（trunk/primary）どうしが交わる大きな交差点、r=2：主要道に別の道路（secondary/tertiary）が交わる、r=1：その他
+const XING_BB=[35.50,139.30,36.02,139.95];
+const xingQuery=(bb,to)=>`[out:json][timeout:${to||60}];(node[highway=traffic_signals][name](${bb.join(",")});node[junction=yes][name](${bb.join(",")});node[highway=crossing][crossing=traffic_signals][name](${bb.join(",")}););out qt;way(bn)[highway~"^(trunk|primary|secondary|tertiary)$"];out body qt;`;
+function buildXing(els){
+  const nodes=[],par=new Map();
+  (els||[]).forEach(e=>{
+    if(e.type==="node"){const t=e.tags||{};const n=String(t["name:ja"]||t.name||"").replace(/[\u0000-\u001f]/g,"").trim().slice(0,30);
+      if(n&&isFinite(e.lat)&&isFinite(e.lon))nodes.push({id:e.id,n,lat:e.lat,lng:e.lon})}
+    else if(e.type==="way"&&Array.isArray(e.nodes)){const t=e.tags||{};const w={c:t.highway,k:t.name||t.ref||("w"+e.id)};
+      e.nodes.forEach(id=>{let a=par.get(id);if(!a)par.set(id,a=[]);a.push(w)})}
+  });
+  // 上下線が分かれた道路などで同じ名前の点が並ぶので、150m以内の同名はまとめてから大きさを決める
+  const out=[];
+  nodes.forEach(o=>{const same=out.find(x=>x.n===o.n&&km(x,o)<0.15);if(same){same._s.push(o);return}out.push({n:o.n,lat:o.lat,lng:o.lng,_s:[o]})});
+  const rank=ids=>{const main=new Set(),sub=new Set();
+    ids.forEach(id=>(par.get(id)||[]).forEach(w=>{(w.c==="trunk"||w.c==="primary"?main:sub).add(w.k)}));
+    sub.forEach(k=>{if(main.has(k))sub.delete(k)});
+    if(main.size>=2)return 3;if(main.size>=1&&sub.size>=1)return 2;if(sub.size>=2)return 2;return 1};
+  return out.map(x=>({n:x.n,lat:+(x._s.reduce((s,o)=>s+o.lat,0)/x._s.length).toFixed(6),lng:+(x._s.reduce((s,o)=>s+o.lng,0)/x._s.length).toFixed(6),r:rank(x._s.map(o=>o.id))}));
+}
+if(typeof module!=="undefined")Object.assign(module.exports,{buildXing,xingQuery,XING_BB});
